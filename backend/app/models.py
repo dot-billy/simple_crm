@@ -1,0 +1,249 @@
+import uuid
+from datetime import datetime
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Enum as SAEnum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    Text,
+)
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+from app.database import Base
+
+import enum
+
+
+# --- Enums ---
+
+class UserRole(str, enum.Enum):
+    ADMIN = "admin"
+    MANAGER = "manager"
+    USER = "user"
+
+
+class DealStage(str, enum.Enum):
+    LEAD = "lead"
+    QUALIFIED = "qualified"
+    PROPOSAL = "proposal"
+    NEGOTIATION = "negotiation"
+    CLOSED_WON = "closed_won"
+    CLOSED_LOST = "closed_lost"
+
+
+class ActivityType(str, enum.Enum):
+    CALL = "call"
+    EMAIL = "email"
+    MEETING = "meeting"
+    NOTE = "note"
+    OTHER = "other"
+
+
+class TaskStatus(str, enum.Enum):
+    TODO = "todo"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+
+
+class CustomFieldType(str, enum.Enum):
+    TEXT = "text"
+    NUMBER = "number"
+    DATE = "date"
+    BOOLEAN = "boolean"
+    SELECT = "select"
+
+
+# --- Association tables ---
+
+contact_tags = Table(
+    "contact_tags",
+    Base.metadata,
+    Column("contact_id", UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", UUID(as_uuid=True), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
+)
+
+company_tags = Table(
+    "company_tags",
+    Base.metadata,
+    Column("company_id", UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", UUID(as_uuid=True), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
+)
+
+deal_tags = Table(
+    "deal_tags",
+    Base.metadata,
+    Column("deal_id", UUID(as_uuid=True), ForeignKey("deals.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", UUID(as_uuid=True), ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+# --- Models ---
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    full_name = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    role = Column(SAEnum(UserRole), nullable=False, default=UserRole.USER)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    contacts = relationship("Contact", back_populates="owner")
+    deals = relationship("Deal", back_populates="owner")
+    tasks = relationship("Task", back_populates="assigned_to_user", foreign_keys="Task.assigned_to")
+    activities = relationship("Activity", back_populates="created_by_user")
+
+
+class Contact(Base):
+    __tablename__ = "contacts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    first_name = Column(String(255), nullable=False)
+    last_name = Column(String(255), nullable=False)
+    email = Column(String(255), index=True)
+    phone = Column(String(50))
+    job_title = Column(String(255))
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="SET NULL"), nullable=True)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    source = Column(String(100))
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    company = relationship("Company", back_populates="contacts")
+    owner = relationship("User", back_populates="contacts")
+    tags = relationship("Tag", secondary=contact_tags, back_populates="contacts")
+    activities = relationship("Activity", back_populates="contact")
+    deals = relationship("Deal", back_populates="contact")
+    tasks = relationship("Task", back_populates="contact")
+    custom_field_values = relationship("CustomFieldValue", back_populates="contact")
+
+
+class Company(Base):
+    __tablename__ = "companies"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False, index=True)
+    domain = Column(String(255))
+    industry = Column(String(255))
+    size = Column(String(50))
+    address = Column(Text)
+    phone = Column(String(50))
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    contacts = relationship("Contact", back_populates="company")
+    tags = relationship("Tag", secondary=company_tags, back_populates="companies")
+    deals = relationship("Deal", back_populates="company")
+    custom_field_values = relationship("CustomFieldValue", back_populates="company")
+
+
+class Deal(Base):
+    __tablename__ = "deals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(String(255), nullable=False)
+    value = Column(Float, default=0)
+    currency = Column(String(10), default="USD")
+    stage = Column(SAEnum(DealStage), nullable=False, default=DealStage.LEAD)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="SET NULL"), nullable=True)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    expected_close_date = Column(DateTime(timezone=True))
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    contact = relationship("Contact", back_populates="deals")
+    company = relationship("Company", back_populates="deals")
+    owner = relationship("User", back_populates="deals")
+    tags = relationship("Tag", secondary=deal_tags, back_populates="deals")
+    activities = relationship("Activity", back_populates="deal")
+    tasks = relationship("Task", back_populates="deal")
+
+
+class Activity(Base):
+    __tablename__ = "activities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    type = Column(SAEnum(ActivityType), nullable=False)
+    subject = Column(String(255), nullable=False)
+    description = Column(Text)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="CASCADE"), nullable=True)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("deals.id", ondelete="CASCADE"), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    activity_date = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    contact = relationship("Contact", back_populates="activities")
+    deal = relationship("Deal", back_populates="activities")
+    created_by_user = relationship("User", back_populates="activities")
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(String(255), nullable=False)
+    description = Column(Text)
+    status = Column(SAEnum(TaskStatus), nullable=False, default=TaskStatus.TODO)
+    due_date = Column(DateTime(timezone=True))
+    assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("deals.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    assigned_to_user = relationship("User", back_populates="tasks")
+    contact = relationship("Contact", back_populates="tasks")
+    deal = relationship("Deal", back_populates="tasks")
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), unique=True, nullable=False, index=True)
+    color = Column(String(7), default="#6366f1")
+
+    contacts = relationship("Contact", secondary=contact_tags, back_populates="tags")
+    companies = relationship("Company", secondary=company_tags, back_populates="tags")
+    deals = relationship("Deal", secondary=deal_tags, back_populates="tags")
+
+
+class CustomFieldDefinition(Base):
+    __tablename__ = "custom_field_definitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    field_type = Column(SAEnum(CustomFieldType), nullable=False)
+    entity_type = Column(String(50), nullable=False)  # "contact" or "company"
+    options = Column(Text)  # JSON string for select options
+    is_required = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CustomFieldValue(Base):
+    __tablename__ = "custom_field_values"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    field_id = Column(UUID(as_uuid=True), ForeignKey("custom_field_definitions.id", ondelete="CASCADE"), nullable=False)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="CASCADE"), nullable=True)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=True)
+    value = Column(Text)
+
+    field = relationship("CustomFieldDefinition")
+    contact = relationship("Contact", back_populates="custom_field_values")
+    company = relationship("Company", back_populates="custom_field_values")
