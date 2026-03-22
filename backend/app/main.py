@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,8 +8,9 @@ from sqlalchemy import select
 from app.auth import hash_password
 from app.config import settings
 from app.database import engine, async_session, Base
+from app.gmail_sync_worker import gmail_sync_loop
 from app.models import User, UserRole
-from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard
+from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email
 
 
 @asynccontextmanager
@@ -30,8 +32,12 @@ async def lifespan(app: FastAPI):
             db.add(admin)
             await db.commit()
 
+    # Start background Gmail sync worker
+    sync_task = asyncio.create_task(gmail_sync_loop())
+
     yield
 
+    sync_task.cancel()
     await engine.dispose()
 
 
@@ -58,6 +64,7 @@ app.include_router(tasks.router)
 app.include_router(tags.router)
 app.include_router(custom_fields.router)
 app.include_router(dashboard.router)
+app.include_router(email.router)
 
 
 @app.get("/api/health")

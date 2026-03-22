@@ -8,6 +8,12 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000"
     ALGORITHM: str = "HS256"
 
+    # Gmail integration
+    GOOGLE_SERVICE_ACCOUNT_FILE: str = ""  # path to service account JSON
+    GOOGLE_DELEGATED_USER: str = ""  # admin email for domain-wide delegation
+    GMAIL_SYNC_INTERVAL_SECONDS: int = 300  # 5 minutes
+    APP_BASE_URL: str = "http://localhost:8000"  # for tracking pixel/link URLs
+
     model_config = {"env_file": ".env"}
 
 

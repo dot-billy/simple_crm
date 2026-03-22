@@ -8,6 +8,7 @@ import {
   Building2,
   Handshake,
   CheckSquare,
+  Mail,
   LogOut,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -20,6 +21,7 @@ const nav = [
   { href: "/companies", label: "Companies", icon: Building2 },
   { href: "/deals", label: "Deals", icon: Handshake },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },
+  { href: "/email", label: "Email", icon: Mail },
 ];
 
 export function Sidebar() {

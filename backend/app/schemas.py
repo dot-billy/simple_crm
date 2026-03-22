@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr
 
-from app.models import ActivityType, CustomFieldType, DealStage, TaskStatus, UserRole
+from app.models import ActivityType, CustomFieldType, DealStage, EmailDirection, EmailTrackingEventType, TaskStatus, UserRole
 
 
 # --- Auth ---
@@ -299,6 +299,91 @@ class DashboardStats(BaseModel):
     deals_by_stage: dict[str, int]
     recent_activities: list[ActivityRead]
     upcoming_tasks: list[TaskRead]
+
+
+# --- Email / Gmail ---
+
+class EmailMessageRead(BaseModel):
+    id: UUID
+    gmail_message_id: str
+    gmail_thread_id: str | None = None
+    direction: EmailDirection
+    from_email: str
+    to_emails: str  # JSON array
+    cc_emails: str | None = None
+    subject: str | None = None
+    body_text: str | None = None
+    body_html: str | None = None
+    snippet: str | None = None
+    contact_id: UUID | None = None
+    deal_id: UUID | None = None
+    synced_by: UUID | None = None
+    has_tracking_pixel: bool = False
+    email_date: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class EmailSendRequest(BaseModel):
+    to: list[str]
+    subject: str
+    body_html: str
+    cc: list[str] | None = None
+    contact_id: UUID | None = None
+    deal_id: UUID | None = None
+    enable_tracking: bool = True
+
+
+class EmailTrackingEventRead(BaseModel):
+    id: UUID
+    email_id: UUID
+    event_type: EmailTrackingEventType
+    url: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class EmailTrackingStats(BaseModel):
+    total_sent: int
+    total_opened: int
+    total_clicked: int
+    open_rate: float
+    click_rate: float
+
+
+class EmailTemplateCreate(BaseModel):
+    name: str
+    subject: str
+    body_html: str
+
+
+class EmailTemplateRead(BaseModel):
+    id: UUID
+    name: str
+    subject: str
+    body_html: str
+    created_by: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class EmailTemplateUpdate(BaseModel):
+    name: str | None = None
+    subject: str | None = None
+    body_html: str | None = None
+
+
+class GmailSyncStatus(BaseModel):
+    is_configured: bool
+    last_sync_at: datetime | None = None
+    is_syncing: bool = False
+    history_id: str | None = None
 
 
 # --- Pagination ---

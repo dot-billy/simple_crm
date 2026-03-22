@@ -53,6 +53,17 @@ class TaskStatus(str, enum.Enum):
     DONE = "done"
 
 
+class EmailDirection(str, enum.Enum):
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+
+
+class EmailTrackingEventType(str, enum.Enum):
+    SENT = "sent"
+    OPENED = "opened"
+    CLICKED = "clicked"
+
+
 class CustomFieldType(str, enum.Enum):
     TEXT = "text"
     NUMBER = "number"
@@ -221,6 +232,73 @@ class Tag(Base):
     contacts = relationship("Contact", secondary=contact_tags, back_populates="tags")
     companies = relationship("Company", secondary=company_tags, back_populates="tags")
     deals = relationship("Deal", secondary=deal_tags, back_populates="tags")
+
+
+class EmailMessage(Base):
+    __tablename__ = "email_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    gmail_message_id = Column(String(255), unique=True, nullable=False, index=True)
+    gmail_thread_id = Column(String(255), index=True)
+    direction = Column(SAEnum(EmailDirection), nullable=False)
+    from_email = Column(String(255), nullable=False)
+    to_emails = Column(Text, nullable=False)  # JSON array
+    cc_emails = Column(Text)  # JSON array
+    subject = Column(String(500))
+    body_text = Column(Text)
+    body_html = Column(Text)
+    snippet = Column(Text)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("deals.id", ondelete="SET NULL"), nullable=True)
+    synced_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    has_tracking_pixel = Column(Boolean, default=False)
+    email_date = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    contact = relationship("Contact")
+    deal = relationship("Deal")
+    synced_by_user = relationship("User")
+    tracking_events = relationship("EmailTrackingEvent", back_populates="email", cascade="all, delete-orphan")
+
+
+class EmailTrackingEvent(Base):
+    __tablename__ = "email_tracking_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email_id = Column(UUID(as_uuid=True), ForeignKey("email_messages.id", ondelete="CASCADE"), nullable=False)
+    event_type = Column(SAEnum(EmailTrackingEventType), nullable=False)
+    url = Column(Text)  # for click events
+    ip_address = Column(String(45))
+    user_agent = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    email = relationship("EmailMessage", back_populates="tracking_events")
+
+
+class EmailTemplate(Base):
+    __tablename__ = "email_templates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False)
+    subject = Column(String(500), nullable=False)
+    body_html = Column(Text, nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    creator = relationship("User")
+
+
+class GmailSyncState(Base):
+    __tablename__ = "gmail_sync_state"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    history_id = Column(String(50))  # Gmail history ID for incremental sync
+    last_sync_at = Column(DateTime(timezone=True))
+    is_syncing = Column(Boolean, default=False)
+
+    user = relationship("User")
 
 
 class CustomFieldDefinition(Base):

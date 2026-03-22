@@ -28,6 +28,12 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production-use-openssl-rand-hex-32}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${GOOGLE_SERVICE_ACCOUNT_FILE:-}
+      GOOGLE_DELEGATED_USER: ${GOOGLE_DELEGATED_USER:-}
+      GMAIL_SYNC_INTERVAL_SECONDS: ${GMAIL_SYNC_INTERVAL_SECONDS:-300}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8000}
+    volumes:
+      - ./backend/credentials:/app/credentials:ro
     ports:
       - "8000:8000"
     depends_on:

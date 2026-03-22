@@ -9,3 +9,7 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.19
 httpx==0.28.1
+google-api-python-client==2.155.0
+google-auth==2.36.0
+google-auth-httplib2==0.2.0
+beautifulsoup4==4.12.3
