@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Activity, User
+from app.models import Activity, User, UserRole
 from app.schemas import ActivityCreate, ActivityRead
 
 router = APIRouter(prefix="/api/activities", tags=["activities"])
@@ -22,6 +22,8 @@ async def list_activities(
     current_user: User = Depends(get_current_user),
 ):
     query = select(Activity)
+    if current_user.role == UserRole.USER:
+        query = query.where(Activity.created_by == current_user.id)
     if contact_id:
         query = query.where(Activity.contact_id == contact_id)
     if deal_id:
@@ -53,6 +55,8 @@ async def delete_activity(activity_id: UUID, db: AsyncSession = Depends(get_db),
     activity = result.scalar_one_or_none()
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
+    if current_user.role == UserRole.USER and activity.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
     await db.delete(activity)
     await db.commit()
     return {"ok": True}

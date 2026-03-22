@@ -9,4 +9,9 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
-CMD ["npm", "run", "dev"]
+RUN npm run build
+
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
+CMD ["npm", "run", "start"]

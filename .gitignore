@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -9,3 +11,8 @@ dist/
 build/
 .venv/
 backend/credentials/*.json
+credentials/
+*.pem
+*.key
+*.p12
+*.pfx

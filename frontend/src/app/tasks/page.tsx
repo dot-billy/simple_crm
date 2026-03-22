@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
 import { Plus, Trash2, CheckCircle2, Circle, Clock } from "lucide-react";
 
@@ -37,7 +36,6 @@ const statusConfig: Record<string, { label: string; icon: typeof Circle; color: 
 };
 
 export default function TasksPage() {
-  const { token } = useAuth();
   const [data, setData] = useState<PaginatedTasks | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
@@ -45,9 +43,8 @@ export default function TasksPage() {
   const [form, setForm] = useState({ title: "", description: "", due_date: "" });
 
   const load = useCallback(() => {
-    if (!token) return;
-    apiFetch<PaginatedTasks>(`/api/tasks?page=${page}&status=${statusFilter}`, { token }).then(setData);
-  }, [token, page, statusFilter]);
+    apiFetch<PaginatedTasks>(`/api/tasks?page=${page}&status=${statusFilter}`).then(setData);
+  }, [page, statusFilter]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -56,19 +53,19 @@ export default function TasksPage() {
     const body: Record<string, string> = { title: form.title };
     if (form.description) body.description = form.description;
     if (form.due_date) body.due_date = new Date(form.due_date).toISOString();
-    await apiFetch("/api/tasks", { method: "POST", body: JSON.stringify(body), token: token! });
+    await apiFetch("/api/tasks", { method: "POST", body: JSON.stringify(body) });
     setDialogOpen(false);
     setForm({ title: "", description: "", due_date: "" });
     load();
   }
 
   async function handleStatusChange(id: string, status: string) {
-    await apiFetch(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }), token: token! });
+    await apiFetch(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
     load();
   }
 
   async function handleDelete(id: string) {
-    await apiFetch(`/api/tasks/${id}`, { method: "DELETE", token: token! });
+    await apiFetch(`/api/tasks/${id}`, { method: "DELETE" });
     load();
   }
 

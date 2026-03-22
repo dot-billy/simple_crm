@@ -1,7 +1,10 @@
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import re
+import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
@@ -24,6 +27,21 @@ from app.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def sign_tracking_url(email_id: str, url_b64: str = "") -> str:
+    """Generate an HMAC signature for a tracking URL."""
+    msg = f"{email_id}:{url_b64}".encode()
+    return hmac.new(settings.SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()[:16]
+
+
+def verify_tracking_signature(email_id: str, url_b64: str, sig: str) -> bool:
+    """Verify an HMAC signature for a tracking URL."""
+    expected = sign_tracking_url(email_id, url_b64)
+    return hmac.compare_digest(expected, sig)
+
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -88,7 +106,8 @@ def _decode_body(payload: dict) -> tuple[str, str]:
 
 def inject_tracking_pixel(html_body: str, email_id: str) -> str:
     """Inject a 1x1 tracking pixel into the email HTML body."""
-    pixel_url = f"{settings.APP_BASE_URL}/api/email/track/open/{email_id}"
+    sig = sign_tracking_url(email_id)
+    pixel_url = f"{settings.APP_BASE_URL}/api/email/track/open/{email_id}?sig={sig}"
     pixel_tag = f'<img src="{pixel_url}" width="1" height="1" style="display:none" alt="" />'
 
     if "</body>" in html_body.lower():
@@ -104,7 +123,8 @@ def rewrite_links_for_tracking(html_body: str, email_id: str) -> str:
         if original_url.startswith("mailto:") or original_url.startswith("#"):
             continue
         encoded = base64.urlsafe_b64encode(original_url.encode()).decode()
-        a_tag["href"] = f"{settings.APP_BASE_URL}/api/email/track/click/{email_id}?url={encoded}"
+        sig = sign_tracking_url(email_id, encoded)
+        a_tag["href"] = f"{settings.APP_BASE_URL}/api/email/track/click/{email_id}?url={encoded}&sig={sig}"
     return str(soup)
 
 
@@ -148,15 +168,27 @@ async def sync_user_gmail(db: AsyncSession, user_email: str, user_id: uuid.UUID)
     """
     service = _get_gmail_service(user_email)
 
-    # Get or create sync state
+    # Get or create sync state with row-level lock to prevent races
     result = await db.execute(
-        select(GmailSyncState).where(GmailSyncState.user_id == user_id)
+        select(GmailSyncState)
+        .where(GmailSyncState.user_id == user_id)
+        .with_for_update(skip_locked=True)
     )
     sync_state = result.scalar_one_or_none()
     if not sync_state:
         sync_state = GmailSyncState(user_id=user_id)
         db.add(sync_state)
         await db.flush()
+        # Re-select with lock
+        result = await db.execute(
+            select(GmailSyncState)
+            .where(GmailSyncState.user_id == user_id)
+            .with_for_update(skip_locked=True)
+        )
+        sync_state = result.scalar_one_or_none()
+        if not sync_state:
+            logger.info("Sync lock contention for %s, skipping", user_email)
+            return 0
 
     if sync_state.is_syncing:
         logger.info("Sync already in progress for %s", user_email)
@@ -348,6 +380,17 @@ async def send_email(
     enable_tracking: bool = True,
 ) -> EmailMessage:
     """Send an email via Gmail API with optional tracking."""
+    # Validate email addresses to prevent header injection
+    for addr in to:
+        if not _EMAIL_RE.match(addr) or '\n' in addr or '\r' in addr:
+            raise ValueError(f"Invalid email address: {addr}")
+    if cc:
+        for addr in cc:
+            if not _EMAIL_RE.match(addr) or '\n' in addr or '\r' in addr:
+                raise ValueError(f"Invalid email address: {addr}")
+    # Strip newlines from subject to prevent header injection
+    subject = subject.replace("\n", "").replace("\r", "")
+
     email_id = uuid.uuid4()
 
     # Inject tracking

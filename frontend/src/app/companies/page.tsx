@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
 import { Plus, Search, Trash2 } from "lucide-react";
 
@@ -31,7 +30,6 @@ interface PaginatedCompanies {
 }
 
 export default function CompaniesPage() {
-  const { token } = useAuth();
   const [data, setData] = useState<PaginatedCompanies | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -39,22 +37,21 @@ export default function CompaniesPage() {
   const [form, setForm] = useState({ name: "", domain: "", industry: "", size: "", phone: "" });
 
   const load = useCallback(() => {
-    if (!token) return;
-    apiFetch<PaginatedCompanies>(`/api/companies?page=${page}&search=${encodeURIComponent(search)}`, { token }).then(setData);
-  }, [token, page, search]);
+    apiFetch<PaginatedCompanies>(`/api/companies?page=${page}&search=${encodeURIComponent(search)}`).then(setData);
+  }, [page, search]);
 
   useEffect(() => { load(); }, [load]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    await apiFetch("/api/companies", { method: "POST", body: JSON.stringify(form), token: token! });
+    await apiFetch("/api/companies", { method: "POST", body: JSON.stringify(form) });
     setDialogOpen(false);
     setForm({ name: "", domain: "", industry: "", size: "", phone: "" });
     load();
   }
 
   async function handleDelete(id: string) {
-    await apiFetch(`/api/companies/${id}`, { method: "DELETE", token: token! });
+    await apiFetch(`/api/companies/${id}`, { method: "DELETE" });
     load();
   }
 

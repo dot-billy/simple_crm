@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import DOMPurify from "dompurify";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
 import {
   Mail,
@@ -95,7 +95,6 @@ interface SyncStatus {
 type TabType = "inbox" | "compose" | "templates" | "tracking";
 
 export default function EmailPage() {
-  const { token } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>("inbox");
   const [emails, setEmails] = useState<PaginatedEmails | null>(null);
   const [search, setSearch] = useState("");
@@ -124,27 +123,23 @@ export default function EmailPage() {
   const [templateForm, setTemplateForm] = useState({ name: "", subject: "", body_html: "" });
 
   const loadEmails = useCallback(() => {
-    if (!token) return;
     const params = new URLSearchParams({ page: String(page) });
     if (search) params.set("search", search);
     if (directionFilter) params.set("direction", directionFilter);
-    apiFetch<PaginatedEmails>(`/api/email/messages?${params}`, { token }).then(setEmails);
-  }, [token, page, search, directionFilter]);
+    apiFetch<PaginatedEmails>(`/api/email/messages?${params}`).then(setEmails);
+  }, [page, search, directionFilter]);
 
   const loadSyncStatus = useCallback(() => {
-    if (!token) return;
-    apiFetch<SyncStatus>("/api/email/sync/status", { token }).then(setSyncStatus);
-  }, [token]);
+    apiFetch<SyncStatus>("/api/email/sync/status").then(setSyncStatus);
+  }, []);
 
   const loadStats = useCallback(() => {
-    if (!token) return;
-    apiFetch<TrackingStats>("/api/email/tracking/stats", { token }).then(setStats);
-  }, [token]);
+    apiFetch<TrackingStats>("/api/email/tracking/stats").then(setStats);
+  }, []);
 
   const loadTemplates = useCallback(() => {
-    if (!token) return;
-    apiFetch<EmailTemplate[]>("/api/email/templates", { token }).then(setTemplates);
-  }, [token]);
+    apiFetch<EmailTemplate[]>("/api/email/templates").then(setTemplates);
+  }, []);
 
   useEffect(() => {
     loadEmails();
@@ -159,9 +154,8 @@ export default function EmailPage() {
   async function handleSync() {
     setSyncing(true);
     try {
-      const result = await apiFetch<{ synced: number }>("/api/email/sync/trigger", {
+      await apiFetch<{ synced: number }>("/api/email/sync/trigger", {
         method: "POST",
-        token: token!,
       });
       loadEmails();
       loadSyncStatus();
@@ -187,7 +181,6 @@ export default function EmailPage() {
           body_html: composeForm.body_html || `<p>${composeForm.body_html}</p>`,
           enable_tracking: composeForm.enable_tracking,
         }),
-        token: token!,
       });
       setComposeOpen(false);
       setComposeForm({ to: "", cc: "", subject: "", body_html: "", enable_tracking: true });
@@ -202,7 +195,6 @@ export default function EmailPage() {
     await apiFetch("/api/email/templates", {
       method: "POST",
       body: JSON.stringify(templateForm),
-      token: token!,
     });
     setTemplateDialogOpen(false);
     setTemplateForm({ name: "", subject: "", body_html: "" });
@@ -210,7 +202,7 @@ export default function EmailPage() {
   }
 
   async function handleDeleteTemplate(id: string) {
-    await apiFetch(`/api/email/templates/${id}`, { method: "DELETE", token: token! });
+    await apiFetch(`/api/email/templates/${id}`, { method: "DELETE" });
     loadTemplates();
   }
 
@@ -226,8 +218,7 @@ export default function EmailPage() {
 
   async function viewEmailTracking(emailId: string) {
     const events = await apiFetch<TrackingEvent[]>(
-      `/api/email/messages/${emailId}/tracking`,
-      { token: token! }
+      `/api/email/messages/${emailId}/tracking`
     );
     setTrackingEvents(events);
   }
@@ -442,7 +433,7 @@ export default function EmailPage() {
                   {selectedEmail.body_html ? (
                     <div
                       className="prose prose-sm max-w-none"
-                      dangerouslySetInnerHTML={{ __html: selectedEmail.body_html }}
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selectedEmail.body_html) }}
                     />
                   ) : (
                     <p className="text-sm whitespace-pre-wrap">{selectedEmail.snippet}</p>

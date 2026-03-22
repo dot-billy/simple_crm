@@ -1,8 +1,13 @@
 import asyncio
+import logging
+import secrets
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 
 from app.auth import hash_password
@@ -11,6 +16,10 @@ from app.database import engine, async_session, Base
 from app.gmail_sync_worker import gmail_sync_loop
 from app.models import User, UserRole
 from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger(__name__)
+audit_logger = logging.getLogger("audit")
 
 
 @asynccontextmanager
@@ -23,10 +32,15 @@ async def lifespan(app: FastAPI):
     async with async_session() as db:
         result = await db.execute(select(User).where(User.role == UserRole.ADMIN))
         if not result.scalar_one_or_none():
+            if settings.ADMIN_PASSWORD:
+                admin_pw = settings.ADMIN_PASSWORD
+            else:
+                admin_pw = secrets.token_urlsafe(16)
+                logger.warning("Generated initial admin password: %s -- change it immediately", admin_pw)
             admin = User(
                 email="admin@local.dev",
                 full_name="Admin User",
-                hashed_password=hash_password("admin123"),
+                hashed_password=hash_password(admin_pw),
                 role=UserRole.ADMIN,
             )
             db.add(admin)
@@ -41,19 +55,33 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title="Simple CRM",
     version="1.0.0",
     lifespan=lifespan,
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS.split(","),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 app.include_router(auth.router)
 app.include_router(contacts.router)

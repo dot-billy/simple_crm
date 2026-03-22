@@ -1,9 +1,12 @@
 import base64
 import json
+import urllib.parse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -11,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.auth import get_current_user, require_role
 from app.config import settings
 from app.database import get_db
-from app.gmail_service import send_email, sync_user_gmail
+from app.gmail_service import send_email, sync_user_gmail, verify_tracking_signature
 from app.models import (
     EmailMessage,
     EmailTemplate,
@@ -33,6 +36,7 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/api/email", tags=["email"])
+limiter = Limiter(key_func=get_remote_address)
 
 # Transparent 1x1 GIF pixel
 TRACKING_PIXEL = base64.b64decode(
@@ -85,6 +89,8 @@ async def list_emails(
     current_user: User = Depends(get_current_user),
 ):
     query = select(EmailMessage)
+    if current_user.role == UserRole.USER:
+        query = query.where(EmailMessage.synced_by == current_user.id)
 
     if contact_id:
         query = query.where(EmailMessage.contact_id == contact_id)
@@ -121,9 +127,10 @@ async def get_email(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(EmailMessage).where(EmailMessage.id == email_id)
-    )
+    query = select(EmailMessage).where(EmailMessage.id == email_id)
+    if current_user.role == UserRole.USER:
+        query = query.where(EmailMessage.synced_by == current_user.id)
+    result = await db.execute(query)
     email = result.scalar_one_or_none()
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
@@ -161,7 +168,10 @@ async def link_email_to_entity(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(EmailMessage).where(EmailMessage.id == email_id))
+    query = select(EmailMessage).where(EmailMessage.id == email_id)
+    if current_user.role == UserRole.USER:
+        query = query.where(EmailMessage.synced_by == current_user.id)
+    result = await db.execute(query)
     email = result.scalar_one_or_none()
     if not email:
         raise HTTPException(status_code=404, detail="Email not found")
@@ -176,26 +186,29 @@ async def link_email_to_entity(
 # --- Tracking (public endpoints - no auth) ---
 
 @router.get("/track/open/{email_id}")
+@limiter.limit("30/minute")
 async def track_open(
     email_id: str,
     request: Request,
+    sig: str = Query(""),
     db: AsyncSession = Depends(get_db),
 ):
     """Tracking pixel endpoint. Returns 1x1 GIF and logs open event."""
     try:
-        result = await db.execute(
-            select(EmailMessage).where(EmailMessage.id == UUID(email_id))
-        )
-        email = result.scalar_one_or_none()
-        if email:
-            event = EmailTrackingEvent(
-                email_id=email.id,
-                event_type=EmailTrackingEventType.OPENED,
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
+        if verify_tracking_signature(email_id, "", sig):
+            result = await db.execute(
+                select(EmailMessage).where(EmailMessage.id == UUID(email_id))
             )
-            db.add(event)
-            await db.commit()
+            email = result.scalar_one_or_none()
+            if email:
+                event = EmailTrackingEvent(
+                    email_id=email.id,
+                    event_type=EmailTrackingEventType.OPENED,
+                    ip_address=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                )
+                db.add(event)
+                await db.commit()
     except Exception:
         pass  # Don't break the pixel even if tracking fails
 
@@ -203,17 +216,27 @@ async def track_open(
 
 
 @router.get("/track/click/{email_id}")
+@limiter.limit("30/minute")
 async def track_click(
     email_id: str,
     url: str,
     request: Request,
+    sig: str = Query(""),
     db: AsyncSession = Depends(get_db),
 ):
     """Click tracking redirect. Logs click and redirects to original URL."""
+    if not verify_tracking_signature(email_id, url, sig):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+
     try:
         original_url = base64.urlsafe_b64decode(url).decode()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid URL")
+
+    # Validate URL scheme to prevent open redirect to javascript: / data: etc.
+    parsed = urllib.parse.urlparse(original_url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Invalid URL scheme")
 
     try:
         result = await db.execute(
@@ -292,7 +315,12 @@ async def list_templates(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(EmailTemplate).order_by(EmailTemplate.name))
+    query = select(EmailTemplate)
+    if current_user.role == UserRole.USER:
+        query = query.where(
+            (EmailTemplate.created_by == current_user.id) | (EmailTemplate.created_by == None)
+        )
+    result = await db.execute(query.order_by(EmailTemplate.name))
     return result.scalars().all()
 
 
@@ -320,6 +348,8 @@ async def update_template(
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
+    if current_user.role == UserRole.USER and template.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(template, field, value)
     await db.commit()
@@ -337,6 +367,8 @@ async def delete_template(
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
+    if current_user.role == UserRole.USER and template.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
     await db.delete(template)
     await db.commit()
     return {"ok": True}

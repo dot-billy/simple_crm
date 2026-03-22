@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
 import { Users, Building2, Handshake, DollarSign } from "lucide-react";
 
@@ -37,14 +36,11 @@ const stageColors: Record<string, string> = {
 };
 
 export default function DashboardPage() {
-  const { token } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
 
   useEffect(() => {
-    if (token) {
-      apiFetch<DashboardData>("/api/dashboard", { token }).then(setData);
-    }
-  }, [token]);
+    apiFetch<DashboardData>("/api/dashboard").then(setData);
+  }, []);
 
   return (
     <AppShell>

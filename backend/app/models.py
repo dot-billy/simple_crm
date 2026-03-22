@@ -152,10 +152,12 @@ class Company(Base):
     address = Column(Text)
     phone = Column(String(50))
     notes = Column(Text)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     contacts = relationship("Contact", back_populates="company")
+    owner = relationship("User")
     tags = relationship("Tag", secondary=company_tags, back_populates="companies")
     deals = relationship("Deal", back_populates="company")
     custom_field_values = relationship("CustomFieldValue", back_populates="company")

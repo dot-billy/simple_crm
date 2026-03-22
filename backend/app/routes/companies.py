@@ -7,10 +7,16 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Company, Tag, User
+from app.models import Company, Tag, User, UserRole
 from app.schemas import CompanyCreate, CompanyRead, CompanyUpdate
 
 router = APIRouter(prefix="/api/companies", tags=["companies"])
+
+
+def _apply_ownership_filter(query, user: User):
+    if user.role == UserRole.USER:
+        query = query.where(Company.owner_id == user.id)
+    return query
 
 
 @router.get("", response_model=dict)
@@ -22,6 +28,7 @@ async def list_companies(
     current_user: User = Depends(get_current_user),
 ):
     query = select(Company).options(selectinload(Company.tags))
+    query = _apply_ownership_filter(query, current_user)
     if search:
         query = query.where(
             (Company.name.ilike(f"%{search}%")) | (Company.domain.ilike(f"%{search}%"))
@@ -40,7 +47,9 @@ async def list_companies(
 
 @router.get("/{company_id}", response_model=CompanyRead)
 async def get_company(company_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    result = await db.execute(select(Company).options(selectinload(Company.tags)).where(Company.id == company_id))
+    query = select(Company).options(selectinload(Company.tags)).where(Company.id == company_id)
+    query = _apply_ownership_filter(query, current_user)
+    result = await db.execute(query)
     company = result.scalar_one_or_none()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -49,7 +58,7 @@ async def get_company(company_id: UUID, db: AsyncSession = Depends(get_db), curr
 
 @router.post("", response_model=CompanyRead)
 async def create_company(data: CompanyCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    company = Company(**data.model_dump(exclude={"tag_ids"}))
+    company = Company(**data.model_dump(exclude={"tag_ids"}), owner_id=current_user.id)
     if data.tag_ids:
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         company.tags = list(tags)
@@ -61,7 +70,9 @@ async def create_company(data: CompanyCreate, db: AsyncSession = Depends(get_db)
 
 @router.patch("/{company_id}", response_model=CompanyRead)
 async def update_company(company_id: UUID, data: CompanyUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    result = await db.execute(select(Company).options(selectinload(Company.tags)).where(Company.id == company_id))
+    query = select(Company).options(selectinload(Company.tags)).where(Company.id == company_id)
+    query = _apply_ownership_filter(query, current_user)
+    result = await db.execute(query)
     company = result.scalar_one_or_none()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -77,7 +88,9 @@ async def update_company(company_id: UUID, data: CompanyUpdate, db: AsyncSession
 
 @router.delete("/{company_id}")
 async def delete_company(company_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    result = await db.execute(select(Company).where(Company.id == company_id))
+    query = select(Company).where(Company.id == company_id)
+    query = _apply_ownership_filter(query, current_user)
+    result = await db.execute(query)
     company = result.scalar_one_or_none()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")

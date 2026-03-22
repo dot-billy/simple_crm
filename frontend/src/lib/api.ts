@@ -7,6 +7,7 @@ interface FetchOptions extends RequestInit {
 export async function apiFetch<T = unknown>(path: string, options: FetchOptions = {}): Promise<T> {
   const { token, headers, ...rest } = options;
   const res = await fetch(`${API_URL}${path}`, {
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -25,13 +26,14 @@ export async function apiFetch<T = unknown>(path: string, options: FetchOptions 
 export async function apiUpload<T = unknown>(
   path: string,
   file: File,
-  token: string,
+  token?: string,
 ): Promise<T> {
   const formData = new FormData();
   formData.append("file", file);
   const res = await fetch(`${API_URL}${path}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: formData,
   });
   if (!res.ok) {

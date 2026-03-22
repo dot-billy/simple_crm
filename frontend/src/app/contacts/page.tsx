@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { useAuth } from "@/lib/auth";
 import { apiFetch, apiUpload } from "@/lib/api";
 import { Plus, Search, Download, Upload, Trash2 } from "lucide-react";
 
@@ -33,7 +32,6 @@ interface PaginatedContacts {
 }
 
 export default function ContactsPage() {
-  const { token } = useAuth();
   const [data, setData] = useState<PaginatedContacts | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -41,29 +39,28 @@ export default function ContactsPage() {
   const [form, setForm] = useState({ first_name: "", last_name: "", email: "", phone: "", job_title: "", source: "" });
 
   const load = useCallback(() => {
-    if (!token) return;
-    apiFetch<PaginatedContacts>(`/api/contacts?page=${page}&search=${encodeURIComponent(search)}`, { token }).then(setData);
-  }, [token, page, search]);
+    apiFetch<PaginatedContacts>(`/api/contacts?page=${page}&search=${encodeURIComponent(search)}`).then(setData);
+  }, [page, search]);
 
   useEffect(() => { load(); }, [load]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    await apiFetch("/api/contacts", { method: "POST", body: JSON.stringify(form), token: token! });
+    await apiFetch("/api/contacts", { method: "POST", body: JSON.stringify(form) });
     setDialogOpen(false);
     setForm({ first_name: "", last_name: "", email: "", phone: "", job_title: "", source: "" });
     load();
   }
 
   async function handleDelete(id: string) {
-    await apiFetch(`/api/contacts/${id}`, { method: "DELETE", token: token! });
+    await apiFetch(`/api/contacts/${id}`, { method: "DELETE" });
     load();
   }
 
   async function handleExport() {
     const res = await fetch(
       `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/contacts/export/csv`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { credentials: "include" }
     );
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -77,7 +74,7 @@ export default function ContactsPage() {
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    await apiUpload("/api/contacts/import/csv", file, token!);
+    await apiUpload("/api/contacts/import/csv", file);
     load();
   }
 

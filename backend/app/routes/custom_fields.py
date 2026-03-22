@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, require_role
 from app.database import get_db
-from app.models import CustomFieldDefinition, CustomFieldValue, User, UserRole
+from app.models import Company, Contact, CustomFieldDefinition, CustomFieldValue, User, UserRole
 from app.schemas import (
     CustomFieldDefinitionCreate,
     CustomFieldDefinitionRead,
@@ -15,6 +15,20 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/api/custom-fields", tags=["custom_fields"])
+
+
+async def _check_entity_ownership(db: AsyncSession, user: User, contact_id: UUID | None, company_id: UUID | None):
+    """For USER role, verify ownership of referenced contact/company."""
+    if user.role != UserRole.USER:
+        return
+    if contact_id:
+        result = await db.execute(select(Contact).where(Contact.id == contact_id, Contact.owner_id == user.id))
+        if not result.scalar_one_or_none():
+            raise HTTPException(status_code=403, detail="Not allowed")
+    if company_id:
+        result = await db.execute(select(Company).where(Company.id == company_id, Company.owner_id == user.id))
+        if not result.scalar_one_or_none():
+            raise HTTPException(status_code=403, detail="Not allowed")
 
 
 @router.get("/definitions", response_model=list[CustomFieldDefinitionRead])
@@ -65,6 +79,7 @@ async def list_values(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await _check_entity_ownership(db, current_user, contact_id, company_id)
     query = select(CustomFieldValue)
     if contact_id:
         query = query.where(CustomFieldValue.contact_id == contact_id)
@@ -80,6 +95,7 @@ async def set_value(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await _check_entity_ownership(db, current_user, data.contact_id, data.company_id)
     # Upsert
     query = select(CustomFieldValue).where(CustomFieldValue.field_id == data.field_id)
     if data.contact_id:

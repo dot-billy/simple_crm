@@ -158,24 +158,37 @@ async def export_contacts_csv(
     )
 
 
+def _sanitize_csv_value(val: str | None) -> str | None:
+    if not val:
+        return val
+    return val.lstrip("=+-@")
+
+
 @router.post("/import/csv")
 async def import_contacts_csv(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    content = (await file.read()).decode("utf-8")
+    MAX_SIZE = 5 * 1024 * 1024  # 5MB
+    MAX_ROWS = 10000
+    raw = await file.read(MAX_SIZE + 1)
+    if len(raw) > MAX_SIZE:
+        raise HTTPException(status_code=413, detail="File too large (max 5MB)")
+    content = raw.decode("utf-8")
     reader = csv.DictReader(io.StringIO(content))
     count = 0
     for row in reader:
+        if count >= MAX_ROWS:
+            break
         contact = Contact(
-            first_name=row.get("first_name", ""),
-            last_name=row.get("last_name", ""),
-            email=row.get("email"),
-            phone=row.get("phone"),
-            job_title=row.get("job_title"),
-            source=row.get("source"),
-            notes=row.get("notes"),
+            first_name=_sanitize_csv_value(row.get("first_name", "")) or "",
+            last_name=_sanitize_csv_value(row.get("last_name", "")) or "",
+            email=_sanitize_csv_value(row.get("email")),
+            phone=_sanitize_csv_value(row.get("phone")),
+            job_title=_sanitize_csv_value(row.get("job_title")),
+            source=_sanitize_csv_value(row.get("source")),
+            notes=_sanitize_csv_value(row.get("notes")),
             owner_id=current_user.id,
         )
         db.add(contact)

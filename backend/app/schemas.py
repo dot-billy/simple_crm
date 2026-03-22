@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.models import ActivityType, CustomFieldType, DealStage, EmailDirection, EmailTrackingEventType, TaskStatus, UserRole
 
@@ -23,9 +23,18 @@ class TokenResponse(BaseModel):
 
 class UserCreate(BaseModel):
     email: EmailStr
-    full_name: str
-    password: str
+    full_name: str = Field(max_length=255)
+    password: str = Field(min_length=10, max_length=128)
     role: UserRole = UserRole.USER
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain an uppercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain a digit")
+        return v
 
 
 class UserRead(BaseModel):
@@ -40,7 +49,7 @@ class UserRead(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    full_name: str | None = None
+    full_name: str | None = Field(None, max_length=255)
     role: UserRole | None = None
     is_active: bool | None = None
 
@@ -48,8 +57,8 @@ class UserUpdate(BaseModel):
 # --- Tag ---
 
 class TagCreate(BaseModel):
-    name: str
-    color: str = "#6366f1"
+    name: str = Field(max_length=100)
+    color: str = Field(default="#6366f1", max_length=7)
 
 
 class TagRead(BaseModel):
@@ -63,14 +72,14 @@ class TagRead(BaseModel):
 # --- Contact ---
 
 class ContactCreate(BaseModel):
-    first_name: str
-    last_name: str
-    email: str | None = None
-    phone: str | None = None
-    job_title: str | None = None
+    first_name: str = Field(max_length=255)
+    last_name: str = Field(max_length=255)
+    email: EmailStr | None = None
+    phone: str | None = Field(None, max_length=50)
+    job_title: str | None = Field(None, max_length=255)
     company_id: UUID | None = None
-    source: str | None = None
-    notes: str | None = None
+    source: str | None = Field(None, max_length=100)
+    notes: str | None = Field(None, max_length=5000)
     tag_ids: list[UUID] = []
 
 
@@ -93,27 +102,27 @@ class ContactRead(BaseModel):
 
 
 class ContactUpdate(BaseModel):
-    first_name: str | None = None
-    last_name: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    job_title: str | None = None
+    first_name: str | None = Field(None, max_length=255)
+    last_name: str | None = Field(None, max_length=255)
+    email: EmailStr | None = None
+    phone: str | None = Field(None, max_length=50)
+    job_title: str | None = Field(None, max_length=255)
     company_id: UUID | None = None
-    source: str | None = None
-    notes: str | None = None
+    source: str | None = Field(None, max_length=100)
+    notes: str | None = Field(None, max_length=5000)
     tag_ids: list[UUID] | None = None
 
 
 # --- Company ---
 
 class CompanyCreate(BaseModel):
-    name: str
-    domain: str | None = None
-    industry: str | None = None
-    size: str | None = None
-    address: str | None = None
-    phone: str | None = None
-    notes: str | None = None
+    name: str = Field(max_length=255)
+    domain: str | None = Field(None, max_length=255)
+    industry: str | None = Field(None, max_length=255)
+    size: str | None = Field(None, max_length=50)
+    address: str | None = Field(None, max_length=1000)
+    phone: str | None = Field(None, max_length=50)
+    notes: str | None = Field(None, max_length=5000)
     tag_ids: list[UUID] = []
 
 
@@ -126,6 +135,7 @@ class CompanyRead(BaseModel):
     address: str | None = None
     phone: str | None = None
     notes: str | None = None
+    owner_id: UUID | None = None
     tags: list[TagRead] = []
     created_at: datetime
     updated_at: datetime
@@ -134,27 +144,27 @@ class CompanyRead(BaseModel):
 
 
 class CompanyUpdate(BaseModel):
-    name: str | None = None
-    domain: str | None = None
-    industry: str | None = None
-    size: str | None = None
-    address: str | None = None
-    phone: str | None = None
-    notes: str | None = None
+    name: str | None = Field(None, max_length=255)
+    domain: str | None = Field(None, max_length=255)
+    industry: str | None = Field(None, max_length=255)
+    size: str | None = Field(None, max_length=50)
+    address: str | None = Field(None, max_length=1000)
+    phone: str | None = Field(None, max_length=50)
+    notes: str | None = Field(None, max_length=5000)
     tag_ids: list[UUID] | None = None
 
 
 # --- Deal ---
 
 class DealCreate(BaseModel):
-    title: str
+    title: str = Field(max_length=255)
     value: float = 0
-    currency: str = "USD"
+    currency: str = Field(default="USD", max_length=10)
     stage: DealStage = DealStage.LEAD
     contact_id: UUID | None = None
     company_id: UUID | None = None
     expected_close_date: datetime | None = None
-    notes: str | None = None
+    notes: str | None = Field(None, max_length=5000)
     tag_ids: list[UUID] = []
 
 
@@ -177,14 +187,14 @@ class DealRead(BaseModel):
 
 
 class DealUpdate(BaseModel):
-    title: str | None = None
+    title: str | None = Field(None, max_length=255)
     value: float | None = None
-    currency: str | None = None
+    currency: str | None = Field(None, max_length=10)
     stage: DealStage | None = None
     contact_id: UUID | None = None
     company_id: UUID | None = None
     expected_close_date: datetime | None = None
-    notes: str | None = None
+    notes: str | None = Field(None, max_length=5000)
     tag_ids: list[UUID] | None = None
 
 
@@ -192,8 +202,8 @@ class DealUpdate(BaseModel):
 
 class ActivityCreate(BaseModel):
     type: ActivityType
-    subject: str
-    description: str | None = None
+    subject: str = Field(max_length=255)
+    description: str | None = Field(None, max_length=5000)
     contact_id: UUID | None = None
     deal_id: UUID | None = None
     activity_date: datetime | None = None
@@ -216,8 +226,8 @@ class ActivityRead(BaseModel):
 # --- Task ---
 
 class TaskCreate(BaseModel):
-    title: str
-    description: str | None = None
+    title: str = Field(max_length=255)
+    description: str | None = Field(None, max_length=5000)
     status: TaskStatus = TaskStatus.TODO
     due_date: datetime | None = None
     assigned_to: UUID | None = None
@@ -241,8 +251,8 @@ class TaskRead(BaseModel):
 
 
 class TaskUpdate(BaseModel):
-    title: str | None = None
-    description: str | None = None
+    title: str | None = Field(None, max_length=255)
+    description: str | None = Field(None, max_length=5000)
     status: TaskStatus | None = None
     due_date: datetime | None = None
     assigned_to: UUID | None = None
@@ -253,10 +263,10 @@ class TaskUpdate(BaseModel):
 # --- Custom Fields ---
 
 class CustomFieldDefinitionCreate(BaseModel):
-    name: str
+    name: str = Field(max_length=255)
     field_type: CustomFieldType
-    entity_type: str  # "contact" or "company"
-    options: str | None = None
+    entity_type: str = Field(max_length=50)  # "contact" or "company"
+    options: str | None = Field(None, max_length=5000)
     is_required: bool = False
 
 
@@ -276,7 +286,7 @@ class CustomFieldValueCreate(BaseModel):
     field_id: UUID
     contact_id: UUID | None = None
     company_id: UUID | None = None
-    value: str
+    value: str = Field(max_length=10000)
 
 
 class CustomFieldValueRead(BaseModel):
@@ -326,10 +336,10 @@ class EmailMessageRead(BaseModel):
 
 
 class EmailSendRequest(BaseModel):
-    to: list[str]
-    subject: str
-    body_html: str
-    cc: list[str] | None = None
+    to: list[EmailStr]
+    subject: str = Field(max_length=500)
+    body_html: str = Field(max_length=500000)
+    cc: list[EmailStr] | None = None
     contact_id: UUID | None = None
     deal_id: UUID | None = None
     enable_tracking: bool = True
@@ -356,9 +366,9 @@ class EmailTrackingStats(BaseModel):
 
 
 class EmailTemplateCreate(BaseModel):
-    name: str
-    subject: str
-    body_html: str
+    name: str = Field(max_length=255)
+    subject: str = Field(max_length=500)
+    body_html: str = Field(max_length=500000)
 
 
 class EmailTemplateRead(BaseModel):
@@ -374,9 +384,9 @@ class EmailTemplateRead(BaseModel):
 
 
 class EmailTemplateUpdate(BaseModel):
-    name: str | None = None
-    subject: str | None = None
-    body_html: str | None = None
+    name: str | None = Field(None, max_length=255)
+    subject: str | None = Field(None, max_length=500)
+    body_html: str | None = Field(None, max_length=500000)
 
 
 class GmailSyncStatus(BaseModel):

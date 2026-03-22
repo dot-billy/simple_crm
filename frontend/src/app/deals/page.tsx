@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -43,7 +42,6 @@ const stages = [
 ];
 
 export default function DealsPage() {
-  const { token } = useAuth();
   const [data, setData] = useState<PaginatedDeals | null>(null);
   const [stageFilter, setStageFilter] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -51,9 +49,8 @@ export default function DealsPage() {
   const [viewMode, setViewMode] = useState<"table" | "pipeline">("pipeline");
 
   const load = useCallback(() => {
-    if (!token) return;
-    apiFetch<PaginatedDeals>(`/api/deals?per_page=100&stage=${stageFilter}`, { token }).then(setData);
-  }, [token, stageFilter]);
+    apiFetch<PaginatedDeals>(`/api/deals?per_page=100&stage=${stageFilter}`).then(setData);
+  }, [stageFilter]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -62,7 +59,6 @@ export default function DealsPage() {
     await apiFetch("/api/deals", {
       method: "POST",
       body: JSON.stringify({ title: form.title, value: parseFloat(form.value), stage: form.stage }),
-      token: token!,
     });
     setDialogOpen(false);
     setForm({ title: "", value: "0", stage: "lead" });
@@ -70,7 +66,7 @@ export default function DealsPage() {
   }
 
   async function handleDelete(id: string) {
-    await apiFetch(`/api/deals/${id}`, { method: "DELETE", token: token! });
+    await apiFetch(`/api/deals/${id}`, { method: "DELETE" });
     load();
   }
 
@@ -78,7 +74,6 @@ export default function DealsPage() {
     await apiFetch(`/api/deals/${dealId}`, {
       method: "PATCH",
       body: JSON.stringify({ stage: newStage }),
-      token: token!,
     });
     load();
   }
