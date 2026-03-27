@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models import User, UserRole
+from app.models import APIKey, User, UserRole
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
@@ -43,6 +43,32 @@ async def get_current_user(
         detail="Invalid credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    # Check for API key auth via X-API-Key header
+    api_key_header = request.headers.get("X-API-Key")
+    if api_key_header:
+        if len(api_key_header) < 8:
+            raise credentials_exception
+        prefix = api_key_header[:8]
+        result = await db.execute(
+            select(APIKey).where(APIKey.key_prefix == prefix, APIKey.is_active == True)
+        )
+        candidates = result.scalars().all()
+        for candidate in candidates:
+            if verify_password(api_key_header, candidate.key_hash):
+                # Check expiry
+                if candidate.expires_at and candidate.expires_at < datetime.now(timezone.utc):
+                    raise credentials_exception
+                # Update last_used_at
+                candidate.last_used_at = datetime.now(timezone.utc)
+                await db.commit()
+                # Load associated user
+                user_result = await db.execute(select(User).where(User.id == candidate.user_id))
+                user = user_result.scalar_one_or_none()
+                if user is None or not user.is_active:
+                    raise credentials_exception
+                return user
+        raise credentials_exception
 
     # Try Bearer header first, fall back to HttpOnly cookie
     auth_token = token or request.cookies.get("access_token")

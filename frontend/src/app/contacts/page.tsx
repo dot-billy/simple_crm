@@ -9,7 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { apiFetch, apiUpload } from "@/lib/api";
-import { Plus, Search, Download, Upload, Trash2 } from "lucide-react";
+import { Plus, Search, Download, Upload, Trash2, Clock } from "lucide-react";
+import { Timeline } from "@/components/timeline";
 
 interface Contact {
   id: string;
@@ -36,6 +37,7 @@ export default function ContactsPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [timelineContactId, setTimelineContactId] = useState<string | null>(null);
   const [form, setForm] = useState({ first_name: "", last_name: "", email: "", phone: "", job_title: "", source: "" });
 
   const load = useCallback(() => {
@@ -157,7 +159,7 @@ export default function ContactsPage() {
                   <th className="p-4">Phone</th>
                   <th className="p-4">Job Title</th>
                   <th className="p-4">Tags</th>
-                  <th className="p-4 w-16"></th>
+                  <th className="p-4 w-24"></th>
                 </tr>
               </thead>
               <tbody>
@@ -177,9 +179,14 @@ export default function ContactsPage() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(c.id)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => setTimelineContactId(c.id)} title="Timeline">
+                          <Clock className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(c.id)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -200,6 +207,14 @@ export default function ContactsPage() {
             </div>
           </div>
         )}
+        <Dialog open={!!timelineContactId} onOpenChange={(open) => { if (!open) setTimelineContactId(null); }}>
+          <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Contact Timeline</DialogTitle>
+            </DialogHeader>
+            {timelineContactId && <Timeline contactId={timelineContactId} />}
+          </DialogContent>
+        </Dialog>
       </div>
     </AppShell>
   );

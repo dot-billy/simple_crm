@@ -233,6 +233,10 @@ class DealUpdate(BaseModel):
     tag_ids: list[UUID] | None = None
 
 
+class DealStageUpdate(BaseModel):
+    stage: DealStage
+
+
 # --- Activity ---
 
 class ActivityCreate(BaseModel):
@@ -336,6 +340,18 @@ class CustomFieldValueRead(BaseModel):
 
 # --- Dashboard ---
 
+class WeeklyDealCount(BaseModel):
+    week: str
+    count: int
+
+
+class DashboardCharts(BaseModel):
+    deals_over_time: list[WeeklyDealCount]
+    revenue_by_stage: dict[str, float]
+    contacts_by_source: dict[str, int]
+    task_completion: dict[str, int]
+
+
 class DashboardStats(BaseModel):
     total_contacts: int
     total_companies: int
@@ -344,6 +360,7 @@ class DashboardStats(BaseModel):
     deals_by_stage: dict[str, int]
     recent_activities: list[ActivityRead]
     upcoming_tasks: list[TaskRead]
+    charts: DashboardCharts
 
 
 # --- Email / Gmail ---
@@ -431,6 +448,34 @@ class GmailSyncStatus(BaseModel):
     history_id: str | None = None
 
 
+# --- Search ---
+
+class SearchResults(BaseModel):
+    contacts: list[ContactRead] = []
+    companies: list[CompanyRead] = []
+    deals: list[DealRead] = []
+    tasks: list[TaskRead] = []
+
+
+# --- Timeline ---
+
+class TimelineItem(BaseModel):
+    id: UUID
+    type: str  # "activity", "email", "task"
+    title: str
+    description: str | None = None
+    date: datetime
+    metadata: dict = {}
+
+
+class PaginatedTimelineResponse(BaseModel):
+    items: list[TimelineItem]
+    total: int
+    page: int
+    per_page: int
+    pages: int
+
+
 # --- Pagination ---
 
 class PaginatedResponse(BaseModel):
@@ -439,3 +484,53 @@ class PaginatedResponse(BaseModel):
     page: int
     per_page: int
     pages: int
+
+
+# --- Notifications ---
+
+class NotificationRead(BaseModel):
+    id: UUID
+    user_id: UUID
+    title: str
+    message: str | None = None
+    entity_type: str | None = None
+    entity_id: UUID | None = None
+    is_read: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class PaginatedNotificationResponse(BaseModel):
+    items: list[NotificationRead]
+    total: int
+    page: int
+    per_page: int
+    pages: int
+    unread_count: int
+
+
+# --- API Keys ---
+
+class APIKeyCreate(BaseModel):
+    name: str = Field(max_length=255)
+    expires_in_days: int | None = Field(default=None, ge=1, le=365)
+
+
+class APIKeyRead(BaseModel):
+    id: UUID
+    name: str
+    key_prefix: str
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None
+    is_active: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class APIKeyCreated(BaseModel):
+    id: UUID
+    name: str
+    key: str  # full key, shown only once
+    key_prefix: str
+    expires_at: datetime | None = None
+    created_at: datetime

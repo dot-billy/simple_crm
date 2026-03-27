@@ -304,6 +304,34 @@ export default function EmailPage() {
                       required
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Variables</Label>
+                    <div className="flex flex-wrap gap-1">
+                      {[
+                        "{{contact.first_name}}",
+                        "{{contact.last_name}}",
+                        "{{contact.email}}",
+                        "{{company.name}}",
+                        "{{deal.title}}",
+                        "{{deal.value}}",
+                        "{{user.full_name}}",
+                      ].map((v) => (
+                        <Badge
+                          key={v}
+                          variant="secondary"
+                          className="cursor-pointer hover:bg-primary/20"
+                          onClick={() =>
+                            setComposeForm({
+                              ...composeForm,
+                              body_html: composeForm.body_html + v,
+                            })
+                          }
+                        >
+                          {v}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -505,6 +533,35 @@ export default function EmailPage() {
                         onChange={(e) => setTemplateForm({ ...templateForm, body_html: e.target.value })}
                         required
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Variables</Label>
+                      <p className="text-xs text-muted-foreground">Click to insert at end of body</p>
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          "{{contact.first_name}}",
+                          "{{contact.last_name}}",
+                          "{{contact.email}}",
+                          "{{company.name}}",
+                          "{{deal.title}}",
+                          "{{deal.value}}",
+                          "{{user.full_name}}",
+                        ].map((v) => (
+                          <Badge
+                            key={v}
+                            variant="secondary"
+                            className="cursor-pointer hover:bg-primary/20"
+                            onClick={() =>
+                              setTemplateForm({
+                                ...templateForm,
+                                body_html: templateForm.body_html + v,
+                              })
+                            }
+                          >
+                            {v}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
                     <Button type="submit" className="w-full">Save Template</Button>
                   </form>

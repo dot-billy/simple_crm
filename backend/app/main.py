@@ -15,7 +15,7 @@ from app.config import settings
 from app.database import engine, async_session, Base
 from app.gmail_sync_worker import gmail_sync_loop
 from app.models import User, UserRole
-from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email
+from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email, search, notifications, api_keys
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ app.add_middleware(
     allow_origins=settings.CORS_ORIGINS.split(","),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "X-API-Key"],
 )
 
 
@@ -93,6 +93,10 @@ app.include_router(tags.router)
 app.include_router(custom_fields.router)
 app.include_router(dashboard.router)
 app.include_router(email.router)
+app.include_router(search.router)
+app.include_router(activities.timeline_router)
+app.include_router(notifications.router)
+app.include_router(api_keys.router)
 
 
 @app.get("/api/health")

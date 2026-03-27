@@ -1,11 +1,13 @@
+import csv
+import io
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_role
 from app.database import get_db
 from app.models import Company, Tag, User, UserRole
 from app.schemas import CompanyCreate, CompanyRead, CompanyUpdate
@@ -97,3 +99,45 @@ async def delete_company(company_id: UUID, db: AsyncSession = Depends(get_db), c
     await db.delete(company)
     await db.commit()
     return {"ok": True}
+
+
+def _sanitize_csv_value(val: str | None) -> str | None:
+    if not val:
+        return val
+    return val.lstrip("=+-@")
+
+
+@router.post("/import/csv")
+async def import_companies_csv(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
+):
+    MAX_SIZE = 5 * 1024 * 1024  # 5MB
+    MAX_ROWS = 10000
+    raw = await file.read(MAX_SIZE + 1)
+    if len(raw) > MAX_SIZE:
+        raise HTTPException(status_code=413, detail="File too large (max 5MB)")
+    content = raw.decode("utf-8")
+    reader = csv.DictReader(io.StringIO(content))
+    count = 0
+    for row in reader:
+        if count >= MAX_ROWS:
+            break
+        name = _sanitize_csv_value(row.get("name", "")) or ""
+        if not name:
+            continue
+        company = Company(
+            name=name,
+            domain=_sanitize_csv_value(row.get("domain")),
+            industry=_sanitize_csv_value(row.get("industry")),
+            size=_sanitize_csv_value(row.get("size")),
+            address=_sanitize_csv_value(row.get("address")),
+            phone=_sanitize_csv_value(row.get("phone")),
+            notes=_sanitize_csv_value(row.get("notes")),
+            owner_id=current_user.id,
+        )
+        db.add(company)
+        count += 1
+    await db.commit()
+    return {"imported": count}

@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Users, Key, ScrollText, Pencil } from "lucide-react";
+import { Plus, Users, Key, ScrollText, Pencil, KeyRound, Copy, Trash2 } from "lucide-react";
 
 interface UserItem {
   id: string;
@@ -64,7 +64,7 @@ const EVENT_BADGE: Record<string, "default" | "destructive" | "secondary" | "out
 export default function AdminPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const [tab, setTab] = useState<"users" | "password" | "audit">("users");
+  const [tab, setTab] = useState<"users" | "password" | "audit" | "apikeys">("users");
 
   useEffect(() => {
     if (user && user.role !== "admin") router.replace("/dashboard");
@@ -101,11 +101,20 @@ export default function AdminPage() {
             <ScrollText className="mr-2 h-4 w-4" />
             Audit Log
           </Button>
+          <Button
+            variant={tab === "apikeys" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setTab("apikeys")}
+          >
+            <KeyRound className="mr-2 h-4 w-4" />
+            API Keys
+          </Button>
         </div>
 
         {tab === "users" && <UsersTab />}
         {tab === "password" && <PasswordTab />}
         {tab === "audit" && <AuditTab />}
+        {tab === "apikeys" && <APIKeysTab />}
       </div>
     </AppShell>
   );
@@ -479,6 +488,202 @@ function AuditTab() {
           </div>
         </div>
       )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  API Keys Tab                                                       */
+/* ------------------------------------------------------------------ */
+
+interface APIKeyItem {
+  id: string;
+  name: string;
+  key_prefix: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+interface APIKeyCreated {
+  id: string;
+  name: string;
+  key: string;
+  key_prefix: string;
+  expires_at: string | null;
+  created_at: string;
+}
+
+function APIKeysTab() {
+  const [keys, setKeys] = useState<APIKeyItem[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [name, setName] = useState("");
+  const [expiry, setExpiry] = useState("never");
+  const [createdKey, setCreatedKey] = useState<APIKeyCreated | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const load = useCallback(() => {
+    apiFetch<APIKeyItem[]>("/api/api-keys").then(setKeys).catch(() => {});
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    const body: Record<string, unknown> = { name };
+    if (expiry !== "never") {
+      body.expires_in_days = parseInt(expiry);
+    }
+    const result = await apiFetch<APIKeyCreated>("/api/api-keys", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    setCreatedKey(result);
+    setName("");
+    setExpiry("never");
+    setShowCreate(false);
+    load();
+  }
+
+  async function handleRevoke(id: string) {
+    await apiFetch(`/api/api-keys/${id}`, { method: "DELETE" });
+    load();
+  }
+
+  function handleCopy(key: string) {
+    navigator.clipboard.writeText(key);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">API Keys</h2>
+        <Button size="sm" onClick={() => { setShowCreate(true); setCreatedKey(null); }}>
+          <Plus className="mr-2 h-4 w-4" />
+          Generate Key
+        </Button>
+      </div>
+
+      {createdKey && (
+        <Card className="border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800">
+          <CardContent className="p-4">
+            <p className="text-sm font-medium mb-2">
+              API key created successfully. Copy it now -- it will not be shown again.
+            </p>
+            <div className="flex items-center gap-2">
+              <Input
+                readOnly
+                value={createdKey.key}
+                className="font-mono text-sm"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleCopy(createdKey.key)}
+              >
+                <Copy className="mr-1 h-4 w-4" />
+                {copied ? "Copied!" : "Copy"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardContent className="p-0">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b text-left text-sm text-muted-foreground">
+                <th className="p-4">Name</th>
+                <th className="p-4">Key Prefix</th>
+                <th className="p-4">Last Used</th>
+                <th className="p-4">Expires</th>
+                <th className="p-4">Status</th>
+                <th className="p-4"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map((k) => (
+                <tr key={k.id} className="border-b hover:bg-muted/50">
+                  <td className="p-4 font-medium">{k.name}</td>
+                  <td className="p-4 text-sm font-mono text-muted-foreground">
+                    {k.key_prefix}...
+                  </td>
+                  <td className="p-4 text-sm text-muted-foreground">
+                    {k.last_used_at
+                      ? new Date(k.last_used_at).toLocaleString()
+                      : "Never"}
+                  </td>
+                  <td className="p-4 text-sm text-muted-foreground">
+                    {k.expires_at
+                      ? new Date(k.expires_at).toLocaleDateString()
+                      : "Never"}
+                  </td>
+                  <td className="p-4">
+                    <Badge variant={k.is_active ? "default" : "destructive"}>
+                      {k.is_active ? "Active" : "Revoked"}
+                    </Badge>
+                  </td>
+                  <td className="p-4">
+                    {k.is_active && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleRevoke(k.id)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {keys.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                    No API keys yet. Generate one to use the API programmatically.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Generate API Key</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreate} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Key Name</Label>
+              <Input
+                required
+                placeholder="e.g. CI/CD Pipeline"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Expiration</Label>
+              <Select value={expiry} onValueChange={setExpiry}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="never">Never</SelectItem>
+                  <SelectItem value="30">30 days</SelectItem>
+                  <SelectItem value="90">90 days</SelectItem>
+                  <SelectItem value="180">180 days</SelectItem>
+                  <SelectItem value="365">365 days</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button type="submit" className="w-full">Generate Key</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

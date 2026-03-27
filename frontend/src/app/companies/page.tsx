@@ -8,8 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { apiFetch } from "@/lib/api";
-import { Plus, Search, Trash2 } from "lucide-react";
+import { apiFetch, apiUpload } from "@/lib/api";
+import { Plus, Search, Download, Upload, Trash2 } from "lucide-react";
 
 interface Company {
   id: string;
@@ -55,11 +55,42 @@ export default function CompaniesPage() {
     load();
   }
 
+  async function handleExport() {
+    const res = await fetch(
+      "/api/companies/export/csv",
+      { credentials: "include" }
+    );
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "companies.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await apiUpload("/api/companies/import/csv", file);
+    load();
+  }
+
   return (
     <AppShell>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-3xl font-bold">Companies</h2>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="mr-1 h-4 w-4" /> Export
+            </Button>
+            <label>
+              <Button variant="outline" size="sm" asChild>
+                <span><Upload className="mr-1 h-4 w-4" /> Import</span>
+              </Button>
+              <input type="file" accept=".csv" className="hidden" onChange={handleImport} />
+            </label>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button size="sm"><Plus className="mr-1 h-4 w-4" /> Add Company</Button>
@@ -95,6 +126,7 @@ export default function CompaniesPage() {
               </form>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
         <div className="relative">

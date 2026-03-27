@@ -6,10 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Activity, User, UserRole
-from app.schemas import ActivityCreate, ActivityRead
+from app.models import Activity, EmailMessage, Task, User, UserRole
+from app.schemas import ActivityCreate, ActivityRead, PaginatedTimelineResponse, TimelineItem
 
 router = APIRouter(prefix="/api/activities", tags=["activities"])
+timeline_router = APIRouter(prefix="/api/contacts", tags=["timeline"])
 
 
 @router.get("", response_model=dict)
@@ -60,3 +61,73 @@ async def delete_activity(activity_id: UUID, db: AsyncSession = Depends(get_db),
     await db.delete(activity)
     await db.commit()
     return {"ok": True}
+
+
+@timeline_router.get("/{contact_id}/timeline", response_model=PaginatedTimelineResponse)
+async def get_contact_timeline(
+    contact_id: UUID,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    timeline_items: list[TimelineItem] = []
+
+    # Activities for this contact
+    act_q = select(Activity).where(Activity.contact_id == contact_id)
+    if current_user.role == UserRole.USER:
+        act_q = act_q.where(Activity.created_by == current_user.id)
+    act_result = await db.execute(act_q)
+    for a in act_result.scalars().all():
+        timeline_items.append(TimelineItem(
+            id=a.id,
+            type="activity",
+            title=a.subject,
+            description=a.description,
+            date=a.activity_date,
+            metadata={"activity_type": a.type.value},
+        ))
+
+    # Emails for this contact
+    email_q = select(EmailMessage).where(EmailMessage.contact_id == contact_id)
+    email_result = await db.execute(email_q)
+    for e in email_result.scalars().all():
+        timeline_items.append(TimelineItem(
+            id=e.id,
+            type="email",
+            title=e.subject or "(no subject)",
+            description=e.snippet,
+            date=e.email_date,
+            metadata={"direction": e.direction.value, "from_email": e.from_email},
+        ))
+
+    # Tasks for this contact
+    task_q = select(Task).where(Task.contact_id == contact_id)
+    if current_user.role == UserRole.USER:
+        task_q = task_q.where(Task.assigned_to == current_user.id)
+    task_result = await db.execute(task_q)
+    for t in task_result.scalars().all():
+        timeline_items.append(TimelineItem(
+            id=t.id,
+            type="task",
+            title=t.title,
+            description=t.description,
+            date=t.due_date or t.created_at,
+            metadata={"status": t.status.value},
+        ))
+
+    # Sort by date descending
+    timeline_items.sort(key=lambda x: x.date, reverse=True)
+
+    total = len(timeline_items)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated = timeline_items[start:end]
+
+    return PaginatedTimelineResponse(
+        items=paginated,
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=(total + per_page - 1) // per_page if per_page else 0,
+    )
