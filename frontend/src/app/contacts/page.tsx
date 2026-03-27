@@ -59,7 +59,7 @@ export default function ContactsPage() {
 
   async function handleExport() {
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/contacts/export/csv`,
+      "/api/contacts/export/csv",
       { credentials: "include" }
     );
     const blob = await res.blob();

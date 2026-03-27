@@ -26,10 +26,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/auth/logout`,
-        { method: "POST", credentials: "include" }
-      );
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     } catch {
       // ignore
     }
@@ -48,15 +45,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     params.append("username", email);
     params.append("password", password);
 
-    const data = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/auth/login`,
-      {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: params,
-      }
-    );
+    const data = await fetch("/api/auth/login", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params,
+    });
     if (!data.ok) {
       const body = await data.json().catch(() => ({}));
       throw new Error(body.detail || "Login failed");
