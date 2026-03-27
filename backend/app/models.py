@@ -327,3 +327,26 @@ class CustomFieldValue(Base):
     field = relationship("CustomFieldDefinition")
     contact = relationship("Contact", back_populates="custom_field_values")
     company = relationship("Company", back_populates="custom_field_values")
+
+
+# --- Audit ---
+
+class AuditEventType(str, enum.Enum):
+    LOGIN_SUCCESS = "login_success"
+    LOGIN_FAILED = "login_failed"
+    USER_CREATED = "user_created"
+    USER_UPDATED = "user_updated"
+    PASSWORD_CHANGED = "password_changed"
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_type = Column(SAEnum(AuditEventType), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    target_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    email = Column(String(255), nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    detail = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

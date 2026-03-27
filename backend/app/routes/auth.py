@@ -1,36 +1,74 @@
 import logging
+import math
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import func
 
 from app.auth import create_access_token, get_current_user, hash_password, require_role, verify_password
 from app.config import settings
 from app.database import get_db
-from app.models import User, UserRole
-from app.schemas import TokenResponse, UserCreate, UserRead, UserUpdate
+from app.models import AuditEventType, AuditLog, User, UserRole
+from app.schemas import (
+    AuditLogRead,
+    PaginatedAuditLogResponse,
+    PasswordChange,
+    TokenResponse,
+    UserCreate,
+    UserRead,
+    UserUpdate,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 audit_logger = logging.getLogger("audit")
 limiter = Limiter(key_func=get_remote_address)
 
 
+async def _write_audit(
+    db: AsyncSession,
+    event_type: AuditEventType,
+    *,
+    ip_address: str | None = None,
+    user_id=None,
+    target_user_id=None,
+    email: str | None = None,
+    detail: str | None = None,
+) -> None:
+    try:
+        entry = AuditLog(
+            event_type=event_type,
+            user_id=user_id,
+            target_user_id=target_user_id,
+            email=email,
+            ip_address=ip_address,
+            detail=detail,
+        )
+        db.add(entry)
+        await db.commit()
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to write audit log")
+
+
 @router.post("/login")
 @limiter.limit("5/minute")
 async def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
     result = await db.execute(select(User).where(User.email == form.username))
     user = result.scalar_one_or_none()
     if not user or not verify_password(form.password, user.hashed_password):
-        audit_logger.warning("LOGIN_FAILED email=%s ip=%s", form.username, request.client.host if request.client else "unknown")
+        audit_logger.warning("LOGIN_FAILED email=%s ip=%s", form.username, ip)
+        await _write_audit(db, AuditEventType.LOGIN_FAILED, ip_address=ip, email=form.username)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
     token = create_access_token(user.id, user.role.value)
-    audit_logger.info("LOGIN_SUCCESS user_id=%s email=%s ip=%s", user.id, user.email, request.client.host if request.client else "unknown")
+    audit_logger.info("LOGIN_SUCCESS user_id=%s email=%s ip=%s", user.id, user.email, ip)
+    await _write_audit(db, AuditEventType.LOGIN_SUCCESS, ip_address=ip, user_id=user.id, email=user.email)
 
     response = JSONResponse(content={
         "access_token": token,
@@ -61,9 +99,27 @@ async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@router.patch("/me/password")
+async def change_password(
+    data: PasswordChange,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(data.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    current_user.hashed_password = hash_password(data.new_password)
+    await db.commit()
+    ip = request.client.host if request.client else "unknown"
+    audit_logger.info("PASSWORD_CHANGED user_id=%s ip=%s", current_user.id, ip)
+    await _write_audit(db, AuditEventType.PASSWORD_CHANGED, ip_address=ip, user_id=current_user.id)
+    return {"ok": True}
+
+
 @router.post("/users", response_model=UserRead)
 async def create_user(
     data: UserCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ):
@@ -79,7 +135,9 @@ async def create_user(
     db.add(user)
     await db.commit()
     await db.refresh(user)
+    ip = request.client.host if request.client else "unknown"
     audit_logger.info("USER_CREATED id=%s email=%s by=%s", user.id, user.email, current_user.id)
+    await _write_audit(db, AuditEventType.USER_CREATED, ip_address=ip, user_id=current_user.id, target_user_id=user.id, email=user.email)
     return user
 
 
@@ -96,6 +154,7 @@ async def list_users(
 async def update_user(
     user_id: str,
     data: UserUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ):
@@ -108,5 +167,35 @@ async def update_user(
         setattr(user, field, value)
     await db.commit()
     await db.refresh(user)
+    ip = request.client.host if request.client else "unknown"
     audit_logger.info("USER_UPDATED id=%s by=%s", user.id, current_user.id)
+    await _write_audit(db, AuditEventType.USER_UPDATED, ip_address=ip, user_id=current_user.id, target_user_id=user.id)
     return user
+
+
+@router.get("/audit-log", response_model=PaginatedAuditLogResponse)
+async def get_audit_log(
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=50, ge=1, le=100),
+    event_type: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+):
+    query = select(AuditLog)
+    count_query = select(func.count(AuditLog.id))
+    if event_type:
+        query = query.where(AuditLog.event_type == event_type)
+        count_query = count_query.where(AuditLog.event_type == event_type)
+    total = (await db.execute(count_query)).scalar() or 0
+    items = (await db.execute(
+        query.order_by(AuditLog.created_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )).scalars().all()
+    return PaginatedAuditLogResponse(
+        items=items,
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=math.ceil(total / per_page) if total else 0,
+    )
