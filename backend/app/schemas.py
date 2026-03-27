@@ -54,6 +54,41 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=10, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if not any(c.isupper() for c in v):
+            raise ValueError("Password must contain an uppercase letter")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("Password must contain a digit")
+        return v
+
+
+class AuditLogRead(BaseModel):
+    id: UUID
+    event_type: str
+    user_id: UUID | None = None
+    target_user_id: UUID | None = None
+    email: str | None = None
+    ip_address: str | None = None
+    detail: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PaginatedAuditLogResponse(BaseModel):
+    items: list[AuditLogRead]
+    total: int
+    page: int
+    per_page: int
+    pages: int
+
+
 # --- Tag ---
 
 class TagCreate(BaseModel):
