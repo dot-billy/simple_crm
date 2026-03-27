@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user, require_role
+from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
 from app.models import Company, Tag, User, UserRole
 from app.schemas import CompanyCreate, CompanyRead, CompanyUpdate
@@ -27,7 +27,7 @@ async def list_companies(
     per_page: int = Query(25, ge=1, le=100),
     search: str = Query(""),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("companies:read")),
 ):
     query = select(Company).options(selectinload(Company.tags))
     query = _apply_ownership_filter(query, current_user)
@@ -48,7 +48,7 @@ async def list_companies(
 
 
 @router.get("/{company_id}", response_model=CompanyRead)
-async def get_company(company_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def get_company(company_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("companies:read"))):
     query = select(Company).options(selectinload(Company.tags)).where(Company.id == company_id)
     query = _apply_ownership_filter(query, current_user)
     result = await db.execute(query)
@@ -59,7 +59,7 @@ async def get_company(company_id: UUID, db: AsyncSession = Depends(get_db), curr
 
 
 @router.post("", response_model=CompanyRead)
-async def create_company(data: CompanyCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def create_company(data: CompanyCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("companies:write"))):
     company = Company(**data.model_dump(exclude={"tag_ids"}), owner_id=current_user.id)
     if data.tag_ids:
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
@@ -71,7 +71,7 @@ async def create_company(data: CompanyCreate, db: AsyncSession = Depends(get_db)
 
 
 @router.patch("/{company_id}", response_model=CompanyRead)
-async def update_company(company_id: UUID, data: CompanyUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def update_company(company_id: UUID, data: CompanyUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("companies:write"))):
     query = select(Company).options(selectinload(Company.tags)).where(Company.id == company_id)
     query = _apply_ownership_filter(query, current_user)
     result = await db.execute(query)
@@ -89,7 +89,7 @@ async def update_company(company_id: UUID, data: CompanyUpdate, db: AsyncSession
 
 
 @router.delete("/{company_id}")
-async def delete_company(company_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_company(company_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("companies:write"))):
     query = select(Company).where(Company.id == company_id)
     query = _apply_ownership_filter(query, current_user)
     result = await db.execute(query)

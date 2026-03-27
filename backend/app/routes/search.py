@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_scope
 from app.database import get_db
 from app.models import Company, Contact, Deal, Task, User, UserRole
 from app.schemas import CompanyRead, ContactRead, DealRead, SearchResults, TaskRead
@@ -39,7 +39,7 @@ async def global_search(
     q: str = Query("", min_length=1),
     type: str | None = Query(None, pattern="^(contact|company|deal|task)$"),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("search:read")),
 ):
     results = SearchResults()
 

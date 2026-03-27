@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user, require_role
+from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
 from app.models import Activity, ActivityType, Deal, DealStage, Tag, User, UserRole
 from app.schemas import DealCreate, DealRead, DealStageUpdate, DealUpdate
@@ -29,7 +29,7 @@ async def list_deals(
     search: str = Query(""),
     stage: str = Query(""),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("deals:read")),
 ):
     query = select(Deal).options(selectinload(Deal.tags))
     query = _apply_ownership_filter(query, current_user)
@@ -50,7 +50,7 @@ async def list_deals(
 
 
 @router.get("/{deal_id}", response_model=DealRead)
-async def get_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def get_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("deals:read"))):
     query = select(Deal).options(selectinload(Deal.tags)).where(Deal.id == deal_id)
     query = _apply_ownership_filter(query, current_user)
     result = await db.execute(query)
@@ -61,7 +61,7 @@ async def get_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current_us
 
 
 @router.post("", response_model=DealRead)
-async def create_deal(data: DealCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def create_deal(data: DealCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("deals:write"))):
     deal = Deal(**data.model_dump(exclude={"tag_ids"}), owner_id=current_user.id)
     if data.tag_ids:
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
@@ -73,7 +73,7 @@ async def create_deal(data: DealCreate, db: AsyncSession = Depends(get_db), curr
 
 
 @router.patch("/{deal_id}", response_model=DealRead)
-async def update_deal(deal_id: UUID, data: DealUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def update_deal(deal_id: UUID, data: DealUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("deals:write"))):
     query = select(Deal).options(selectinload(Deal.tags)).where(Deal.id == deal_id)
     query = _apply_ownership_filter(query, current_user)
     result = await db.execute(query)
@@ -91,7 +91,7 @@ async def update_deal(deal_id: UUID, data: DealUpdate, db: AsyncSession = Depend
 
 
 @router.delete("/{deal_id}")
-async def delete_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("deals:write"))):
     query = select(Deal).where(Deal.id == deal_id)
     query = _apply_ownership_filter(query, current_user)
     result = await db.execute(query)
@@ -108,7 +108,7 @@ async def update_deal_stage(
     deal_id: UUID,
     data: DealStageUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("deals:write")),
 ):
     query = select(Deal).options(selectinload(Deal.tags)).where(Deal.id == deal_id)
     query = _apply_ownership_filter(query, current_user)

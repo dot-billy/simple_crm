@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_scope
 from app.database import get_db
 from app.models import Activity, EmailMessage, Task, User, UserRole
 from app.schemas import ActivityCreate, ActivityRead, PaginatedTimelineResponse, TimelineItem
@@ -20,7 +20,7 @@ async def list_activities(
     contact_id: UUID | None = Query(None),
     deal_id: UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("activities:read")),
 ):
     query = select(Activity)
     if current_user.role == UserRole.USER:
@@ -42,7 +42,7 @@ async def list_activities(
 
 
 @router.post("", response_model=ActivityRead)
-async def create_activity(data: ActivityCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def create_activity(data: ActivityCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("activities:write"))):
     activity = Activity(**data.model_dump(), created_by=current_user.id)
     db.add(activity)
     await db.commit()
@@ -51,7 +51,7 @@ async def create_activity(data: ActivityCreate, db: AsyncSession = Depends(get_d
 
 
 @router.delete("/{activity_id}")
-async def delete_activity(activity_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_activity(activity_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("activities:write"))):
     result = await db.execute(select(Activity).where(Activity.id == activity_id))
     activity = result.scalar_one_or_none()
     if not activity:
@@ -69,7 +69,7 @@ async def get_contact_timeline(
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("activities:read")),
 ):
     timeline_items: list[TimelineItem] = []
 

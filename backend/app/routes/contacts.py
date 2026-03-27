@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_scope
 from app.database import get_db
 from app.models import Contact, Tag, User, UserRole
 from app.schemas import ContactCreate, ContactRead, ContactUpdate
@@ -28,7 +28,7 @@ async def list_contacts(
     per_page: int = Query(25, ge=1, le=100),
     search: str = Query(""),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:read")),
 ):
     query = select(Contact).options(selectinload(Contact.tags))
     query = _apply_ownership_filter(query, current_user)
@@ -60,7 +60,7 @@ async def list_contacts(
 async def get_contact(
     contact_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:read")),
 ):
     query = select(Contact).options(selectinload(Contact.tags)).where(Contact.id == contact_id)
     query = _apply_ownership_filter(query, current_user)
@@ -75,7 +75,7 @@ async def get_contact(
 async def create_contact(
     data: ContactCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:write")),
 ):
     contact = Contact(
         **data.model_dump(exclude={"tag_ids"}),
@@ -95,7 +95,7 @@ async def update_contact(
     contact_id: UUID,
     data: ContactUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:write")),
 ):
     query = select(Contact).options(selectinload(Contact.tags)).where(Contact.id == contact_id)
     query = _apply_ownership_filter(query, current_user)
@@ -121,7 +121,7 @@ async def update_contact(
 async def delete_contact(
     contact_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:write")),
 ):
     query = select(Contact).where(Contact.id == contact_id)
     query = _apply_ownership_filter(query, current_user)
@@ -137,7 +137,7 @@ async def delete_contact(
 @router.get("/export/csv")
 async def export_contacts_csv(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:read")),
 ):
     query = select(Contact)
     query = _apply_ownership_filter(query, current_user)
@@ -168,7 +168,7 @@ def _sanitize_csv_value(val: str | None) -> str | None:
 async def import_contacts_csv(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:write")),
 ):
     MAX_SIZE = 5 * 1024 * 1024  # 5MB
     MAX_ROWS = 10000
