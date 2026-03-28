@@ -18,6 +18,7 @@ import {
   DragStartEvent,
   closestCenter,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -158,7 +159,8 @@ export default function DealsPage() {
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
   );
 
   const load = useCallback(() => {
@@ -261,9 +263,9 @@ export default function DealsPage() {
   return (
     <AppShell>
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-bold">Deals</h2>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-2xl font-bold sm:text-3xl">Deals</h2>
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download className="mr-1 h-4 w-4" /> Export
             </Button>
@@ -298,7 +300,7 @@ export default function DealsPage() {
                     <Label>Title</Label>
                     <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Value ($)</Label>
                       <Input type="number" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
@@ -329,7 +331,7 @@ export default function DealsPage() {
           >
             <div className="flex gap-4 overflow-x-auto pb-4">
               {dealsByStage.map((col) => (
-                <div key={col.value} className="min-w-[280px] flex-shrink-0">
+                <div key={col.value} className="min-w-[250px] sm:min-w-[280px] flex-shrink-0">
                   <div className="mb-3 flex items-center justify-between">
                     <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${col.color}`}>
                       {col.label}
@@ -355,7 +357,7 @@ export default function DealsPage() {
             </div>
             <DragOverlay>
               {activeDeal ? (
-                <Card className="shadow-lg w-[280px]">
+                <Card className="shadow-lg w-[250px] sm:w-[280px]">
                   <CardContent className="p-4">
                     <div className="flex items-start gap-2">
                       <GripVertical className="h-4 w-4 mt-0.5 text-muted-foreground" />
@@ -374,7 +376,8 @@ export default function DealsPage() {
         ) : (
           <Card>
             <CardContent className="p-0">
-              <table className="w-full">
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[600px]">
                 <thead>
                   <tr className="border-b text-left text-sm text-muted-foreground">
                     <th className="p-4">Title</th>
@@ -408,6 +411,7 @@ export default function DealsPage() {
                   )}
                 </tbody>
               </table>
+              </div>
             </CardContent>
           </Card>
         )}

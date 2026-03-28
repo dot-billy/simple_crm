@@ -28,12 +28,16 @@ const nav = [
   { href: "/email", label: "Email", icon: Mail },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  onNavigate?: () => void;
+}
+
+export function Sidebar({ onNavigate }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
 
   return (
-    <aside className="flex h-screen w-64 flex-col border-r bg-card">
+    <aside className="flex h-full w-64 flex-col border-r bg-card">
       <div className="flex items-center justify-between border-b px-6 py-4">
         <h1 className="text-lg font-bold">Simple CRM</h1>
         <button
@@ -50,6 +54,7 @@ export function Sidebar() {
           <Link
             key={item.href}
             href={item.href}
+            onClick={onNavigate}
             className={cn(
               "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent",
               pathname.startsWith(item.href) ? "bg-accent text-accent-foreground" : "text-muted-foreground"
@@ -62,6 +67,7 @@ export function Sidebar() {
         {user?.role === "admin" && (
           <Link
             href="/admin"
+            onClick={onNavigate}
             className={cn(
               "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent",
               pathname.startsWith("/admin") ? "bg-accent text-accent-foreground" : "text-muted-foreground"
@@ -74,7 +80,7 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t p-4">
-        <div className="mb-2">
+        <div className="mb-2 hidden md:block">
           <NotificationBell />
         </div>
         <div className="mb-2 flex items-center gap-2">

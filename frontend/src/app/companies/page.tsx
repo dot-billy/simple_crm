@@ -79,9 +79,9 @@ export default function CompaniesPage() {
   return (
     <AppShell>
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-bold">Companies</h2>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-2xl font-bold sm:text-3xl">Companies</h2>
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download className="mr-1 h-4 w-4" /> Export
             </Button>
@@ -102,7 +102,7 @@ export default function CompaniesPage() {
                   <Label>Company Name</Label>
                   <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Domain</Label>
                     <Input value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="example.com" />
@@ -112,7 +112,7 @@ export default function CompaniesPage() {
                     <Input value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Size</Label>
                     <Input value={form.size} onChange={(e) => setForm({ ...form, size: e.target.value })} placeholder="e.g. 50-100" />
@@ -136,7 +136,8 @@ export default function CompaniesPage() {
 
         <Card>
           <CardContent className="p-0">
-            <table className="w-full">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px]">
               <thead>
                 <tr className="border-b text-left text-sm text-muted-foreground">
                   <th className="p-4">Name</th>
@@ -171,6 +172,7 @@ export default function CompaniesPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </CardContent>
         </Card>
 

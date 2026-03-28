@@ -83,9 +83,9 @@ export default function ContactsPage() {
   return (
     <AppShell>
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-bold">Contacts</h2>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-2xl font-bold sm:text-3xl">Contacts</h2>
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download className="mr-1 h-4 w-4" /> Export
             </Button>
@@ -104,7 +104,7 @@ export default function ContactsPage() {
                   <DialogTitle>New Contact</DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleCreate} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>First Name</Label>
                       <Input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} required />
@@ -118,7 +118,7 @@ export default function ContactsPage() {
                     <Label>Email</Label>
                     <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Phone</Label>
                       <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
@@ -151,7 +151,8 @@ export default function ContactsPage() {
 
         <Card>
           <CardContent className="p-0">
-            <table className="w-full">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px]">
               <thead>
                 <tr className="border-b text-left text-sm text-muted-foreground">
                   <th className="p-4">Name</th>
@@ -195,6 +196,7 @@ export default function ContactsPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </CardContent>
         </Card>
 
