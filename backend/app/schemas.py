@@ -667,3 +667,47 @@ class AgentWhoAmI(BaseModel):
     account_type: str
     scopes: list[str] | None = None
     rate_limit_per_minute: int | None = None
+
+
+# --- Profile / Dossier ---
+
+class ContactStats(BaseModel):
+    total_deals: int = 0
+    total_deal_value: float = 0.0
+    open_deals: int = 0
+    won_deals: int = 0
+    total_activities: int = 0
+    total_tasks: int = 0
+    open_tasks: int = 0
+    last_activity_date: datetime | None = None
+
+
+class ContactProfile(BaseModel):
+    contact: ContactRead
+    company: CompanyRead | None = None
+    deals: list[DealRead] = []
+    tasks: list[TaskRead] = []
+    custom_fields: list[CustomFieldValueRead] = []
+    custom_field_definitions: list[CustomFieldDefinitionRead] = []
+    stats: ContactStats
+    model_config = {"from_attributes": True}
+
+
+class CompanyStats(BaseModel):
+    total_contacts: int = 0
+    total_deals: int = 0
+    total_deal_value: float = 0.0
+    open_deals: int = 0
+    won_deals: int = 0
+    total_activities: int = 0
+    last_activity_date: datetime | None = None
+
+
+class CompanyProfile(BaseModel):
+    company: CompanyRead
+    contacts: list[ContactRead] = []
+    deals: list[DealRead] = []
+    custom_fields: list[CustomFieldValueRead] = []
+    custom_field_definitions: list[CustomFieldDefinitionRead] = []
+    stats: CompanyStats
+    model_config = {"from_attributes": True}

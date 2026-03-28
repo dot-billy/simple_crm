@@ -1,0 +1,415 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { AppShell } from "@/components/app-shell";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Timeline } from "@/components/timeline";
+import { ActivityForm } from "@/components/activity-form";
+import { CustomFields } from "@/components/custom-fields";
+import { apiFetch } from "@/lib/api";
+import {
+  ArrowLeft, Globe, Phone, MapPin, Building2,
+  Pencil, TrendingUp, Users, DollarSign, Activity,
+} from "lucide-react";
+
+interface CompanyProfile {
+  company: {
+    id: string;
+    name: string;
+    domain: string | null;
+    industry: string | null;
+    size: string | null;
+    address: string | null;
+    phone: string | null;
+    notes: string | null;
+    tags: Array<{ id: string; name: string; color: string }>;
+    created_at: string;
+    updated_at: string;
+  };
+  contacts: Array<{
+    id: string;
+    first_name: string;
+    last_name: string;
+    email: string | null;
+    phone: string | null;
+    job_title: string | null;
+    tags: Array<{ id: string; name: string; color: string }>;
+  }>;
+  deals: Array<{
+    id: string;
+    title: string;
+    value: number;
+    stage: string;
+    expected_close_date: string | null;
+    tags: Array<{ id: string; name: string; color: string }>;
+  }>;
+  custom_fields: Array<{ id: string; definition_id: string; contact_id: string | null; company_id: string | null; value: string }>;
+  custom_field_definitions: Array<{ id: string; name: string; field_type: string; entity_type: string; options: string | null; is_required: boolean }>;
+  stats: {
+    total_contacts: number;
+    total_deals: number;
+    total_deal_value: number;
+    open_deals: number;
+    won_deals: number;
+    total_activities: number;
+    last_activity_date: string | null;
+  };
+}
+
+const stageColors: Record<string, string> = {
+  lead: "bg-blue-100 text-blue-800",
+  qualified: "bg-yellow-100 text-yellow-800",
+  proposal: "bg-purple-100 text-purple-800",
+  negotiation: "bg-orange-100 text-orange-800",
+  closed_won: "bg-green-100 text-green-800",
+  closed_lost: "bg-red-100 text-red-800",
+};
+
+const stageLabels: Record<string, string> = {
+  lead: "Lead", qualified: "Qualified", proposal: "Proposal",
+  negotiation: "Negotiation", closed_won: "Won", closed_lost: "Lost",
+};
+
+export default function CompanyProfilePage() {
+  const params = useParams();
+  const router = useRouter();
+  const companyId = params.id as string;
+  const [profile, setProfile] = useState<CompanyProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", domain: "", industry: "", size: "", address: "", phone: "", notes: "" });
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notesValue, setNotesValue] = useState("");
+  const [timelineKey, setTimelineKey] = useState(0);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await apiFetch<CompanyProfile>(`/api/companies/${companyId}/profile`);
+      setProfile(data);
+    } catch {
+      router.replace("/companies");
+    } finally {
+      setLoading(false);
+    }
+  }, [companyId, router]);
+
+  useEffect(() => { load(); }, [load]);
+
+  function openEdit() {
+    if (!profile) return;
+    const c = profile.company;
+    setEditForm({
+      name: c.name, domain: c.domain || "", industry: c.industry || "",
+      size: c.size || "", address: c.address || "",
+      phone: c.phone || "", notes: c.notes || "",
+    });
+    setEditOpen(true);
+  }
+
+  async function handleEditSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await apiFetch(`/api/companies/${companyId}`, {
+      method: "PATCH",
+      body: JSON.stringify(editForm),
+    });
+    setEditOpen(false);
+    load();
+  }
+
+  async function saveNotes() {
+    await apiFetch(`/api/companies/${companyId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ notes: notesValue }),
+    });
+    setEditingNotes(false);
+    load();
+  }
+
+  function handleActivityCreated() {
+    load();
+    setTimelineKey((k) => k + 1);
+  }
+
+  if (loading || !profile) {
+    return (
+      <AppShell>
+        <div className="flex h-64 items-center justify-center">
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const { company, contacts, deals, stats, custom_fields, custom_field_definitions } = profile;
+
+  return (
+    <AppShell>
+      <div className="space-y-6">
+        {/* Back button */}
+        <Link href="/companies" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back to Companies
+        </Link>
+
+        {/* Hero */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary text-xl font-bold text-primary-foreground">
+              <Building2 className="h-7 w-7" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold">{company.name}</h1>
+              <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                {company.industry && <span>{company.industry}</span>}
+                {company.size && <span>{company.size} employees</span>}
+                {company.domain && (
+                  <a href={`https://${company.domain}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-primary hover:underline">
+                    <Globe className="h-3 w-3" />{company.domain}
+                  </a>
+                )}
+              </div>
+              {company.tags.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {company.tags.map((t) => (
+                    <Badge key={t.id} variant="secondary" style={{ backgroundColor: t.color + "20", color: t.color }} className="text-xs">
+                      {t.name}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={openEdit}>
+            <Pencil className="mr-1 h-4 w-4" /> Edit
+          </Button>
+        </div>
+
+        {/* Two-column layout */}
+        <div className="grid gap-6 md:grid-cols-3">
+          {/* Left column */}
+          <div className="space-y-6 md:col-span-2">
+            {/* Company Info */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Company Information</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {company.phone && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Phone className="h-4 w-4 text-muted-foreground" />
+                      <a href={`tel:${company.phone}`} className="hover:underline">{company.phone}</a>
+                    </div>
+                  )}
+                  {company.address && (
+                    <div className="flex items-start gap-2 text-sm">
+                      <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span>{company.address}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Notes */}
+                <div className="border-t pt-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Notes</p>
+                    {!editingNotes && (
+                      <button
+                        onClick={() => { setNotesValue(company.notes || ""); setEditingNotes(true); }}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  {editingNotes ? (
+                    <div className="mt-2 space-y-2">
+                      <textarea
+                        className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        rows={4}
+                        value={notesValue}
+                        onChange={(e) => setNotesValue(e.target.value)}
+                        placeholder="Add notes about this company..."
+                        autoFocus
+                      />
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={saveNotes}>Save</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditingNotes(false)}>Cancel</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-sm whitespace-pre-wrap">{company.notes || <span className="text-muted-foreground italic">No notes yet. Click the pencil to add some.</span>}</p>
+                  )}
+                </div>
+
+                {/* Custom Fields */}
+                {custom_field_definitions.length > 0 && (
+                  <div className="border-t pt-3">
+                    <CustomFields
+                      entityType="company"
+                      entityId={companyId}
+                      definitions={custom_field_definitions}
+                      values={custom_fields}
+                      onUpdate={load}
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Timeline */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Activity Timeline</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {contacts.length > 0 && (
+                  <ActivityForm contactId={contacts[0].id} onCreated={handleActivityCreated} />
+                )}
+                <Timeline key={timelineKey} companyId={companyId} />
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right column */}
+          <div className="space-y-6">
+            {/* Stats */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Overview</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 text-muted-foreground"><Users className="h-4 w-4" />Contacts</span>
+                  <span className="font-semibold">{stats.total_contacts}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 text-muted-foreground"><DollarSign className="h-4 w-4" />Pipeline Value</span>
+                  <span className="font-semibold">${stats.total_deal_value.toLocaleString()}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 text-muted-foreground"><TrendingUp className="h-4 w-4" />Open Deals</span>
+                  <span className="font-semibold">{stats.open_deals}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 text-muted-foreground"><Activity className="h-4 w-4" />Activities</span>
+                  <span className="font-semibold">{stats.total_activities}</span>
+                </div>
+                {stats.last_activity_date && (
+                  <div className="border-t pt-2 text-xs text-muted-foreground">
+                    Last activity: {new Date(stats.last_activity_date).toLocaleDateString()}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Key Contacts */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Key Contacts ({contacts.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {contacts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No contacts yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {contacts.map((c) => (
+                      <Link key={c.id} href={`/contacts/${c.id}`} className="flex items-center gap-3 rounded-md border p-2 hover:bg-muted/50">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                          {c.first_name[0]}{c.last_name[0]}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{c.first_name} {c.last_name}</p>
+                          <p className="text-xs text-muted-foreground truncate">{c.job_title || c.email || ""}</p>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Deals */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Deals ({deals.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {deals.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No deals yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {deals.map((d) => (
+                      <div key={d.id} className="flex items-center justify-between rounded-md border p-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{d.title}</p>
+                          <p className="text-xs text-muted-foreground">${d.value.toLocaleString()}</p>
+                        </div>
+                        <Badge variant="secondary" className={`text-xs ${stageColors[d.stage] || ""}`}>
+                          {stageLabels[d.stage] || d.stage}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+
+      {/* Edit Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Company</DialogTitle></DialogHeader>
+          <form onSubmit={handleEditSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label>Company Name</Label>
+              <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} required />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Domain</Label>
+                <Input value={editForm.domain} onChange={(e) => setEditForm({ ...editForm, domain: e.target.value })} placeholder="example.com" />
+              </div>
+              <div className="space-y-2">
+                <Label>Industry</Label>
+                <Input value={editForm.industry} onChange={(e) => setEditForm({ ...editForm, industry: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Size</Label>
+                <Input value={editForm.size} onChange={(e) => setEditForm({ ...editForm, size: e.target.value })} placeholder="e.g. 50-100" />
+              </div>
+              <div className="space-y-2">
+                <Label>Phone</Label>
+                <Input value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Address</Label>
+              <Input value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <textarea
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                rows={3}
+                value={editForm.notes}
+                onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+              />
+            </div>
+            <Button type="submit" className="w-full">Save Changes</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </AppShell>
+  );
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -166,7 +167,7 @@ export default function ContactsPage() {
               <tbody>
                 {data?.items.map((c) => (
                   <tr key={c.id} className="border-b hover:bg-muted/50">
-                    <td className="p-4 font-medium">{c.first_name} {c.last_name}</td>
+                    <td className="p-4 font-medium"><Link href={`/contacts/${c.id}`} className="text-primary hover:underline">{c.first_name} {c.last_name}</Link></td>
                     <td className="p-4 text-sm">{c.email || "-"}</td>
                     <td className="p-4 text-sm">{c.phone || "-"}</td>
                     <td className="p-4 text-sm">{c.job_title || "-"}</td>

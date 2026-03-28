@@ -10,8 +10,8 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user, require_scope
 from app.database import get_db
-from app.models import Contact, Tag, User, UserRole
-from app.schemas import ContactCreate, ContactRead, ContactUpdate
+from app.models import Activity, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole
+from app.schemas import ContactCreate, ContactProfile, ContactRead, ContactStats, ContactUpdate, CompanyRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead, TaskRead
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
 
@@ -132,6 +132,70 @@ async def delete_contact(
     await db.delete(contact)
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/{contact_id}/profile", response_model=ContactProfile)
+async def get_contact_profile(
+    contact_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("contacts:read")),
+):
+    query = (
+        select(Contact)
+        .options(
+            selectinload(Contact.tags),
+            selectinload(Contact.company).selectinload(Company.tags),
+            selectinload(Contact.deals).selectinload(Deal.tags),
+            selectinload(Contact.tasks),
+            selectinload(Contact.custom_field_values),
+        )
+        .where(Contact.id == contact_id)
+    )
+    query = _apply_ownership_filter(query, current_user)
+    result = await db.execute(query)
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    # Custom field definitions for contacts
+    defs_result = await db.execute(
+        select(CustomFieldDefinition).where(CustomFieldDefinition.entity_type == "contact").order_by(CustomFieldDefinition.name)
+    )
+    definitions = defs_result.scalars().all()
+
+    # Compute stats
+    closed_stages = {DealStage.CLOSED_WON, DealStage.CLOSED_LOST}
+    deals = contact.deals or []
+    tasks = contact.tasks or []
+
+    # Last activity date
+    last_act_q = select(func.max(Activity.activity_date)).where(Activity.contact_id == contact_id)
+    last_activity_date = (await db.execute(last_act_q)).scalar()
+
+    # Total activities count
+    act_count_q = select(func.count()).select_from(Activity).where(Activity.contact_id == contact_id)
+    total_activities = (await db.execute(act_count_q)).scalar() or 0
+
+    stats = ContactStats(
+        total_deals=len(deals),
+        total_deal_value=sum(d.value or 0 for d in deals),
+        open_deals=sum(1 for d in deals if d.stage not in closed_stages),
+        won_deals=sum(1 for d in deals if d.stage == DealStage.CLOSED_WON),
+        total_activities=total_activities,
+        total_tasks=len(tasks),
+        open_tasks=sum(1 for t in tasks if t.status != TaskStatus.DONE),
+        last_activity_date=last_activity_date,
+    )
+
+    return ContactProfile(
+        contact=ContactRead.model_validate(contact),
+        company=CompanyRead.model_validate(contact.company) if contact.company else None,
+        deals=[DealRead.model_validate(d) for d in deals],
+        tasks=[TaskRead.model_validate(t) for t in tasks],
+        custom_fields=[CustomFieldValueRead.model_validate(v) for v in (contact.custom_field_values or [])],
+        custom_field_definitions=[CustomFieldDefinitionRead.model_validate(d) for d in definitions],
+        stats=stats,
+    )
 
 
 @router.get("/export/csv")

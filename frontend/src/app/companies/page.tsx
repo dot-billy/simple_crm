@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -151,7 +152,7 @@ export default function CompaniesPage() {
               <tbody>
                 {data?.items.map((c) => (
                   <tr key={c.id} className="border-b hover:bg-muted/50">
-                    <td className="p-4 font-medium">{c.name}</td>
+                    <td className="p-4 font-medium"><Link href={`/companies/${c.id}`} className="text-primary hover:underline">{c.name}</Link></td>
                     <td className="p-4 text-sm">{c.domain || "-"}</td>
                     <td className="p-4 text-sm">{c.industry || "-"}</td>
                     <td className="p-4 text-sm">{c.size || "-"}</td>

@@ -30,18 +30,27 @@ const typeConfig: Record<
   task: { icon: CheckSquare, color: "text-green-600", bg: "bg-green-100" },
 };
 
-export function Timeline({ contactId }: { contactId: string }) {
+interface TimelineProps {
+  contactId?: string;
+  companyId?: string;
+}
+
+export function Timeline({ contactId, companyId }: TimelineProps) {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const basePath = contactId
+    ? `/api/contacts/${contactId}/timeline`
+    : `/api/companies/${companyId}/timeline`;
 
   const load = useCallback(
     async (pageNum: number) => {
       setLoading(true);
       try {
         const res = await apiFetch<TimelineResponse>(
-          `/api/contacts/${contactId}/timeline?per_page=50&page=${pageNum}`
+          `${basePath}?per_page=50&page=${pageNum}`
         );
         if (pageNum === 1) {
           setItems(res.items);
@@ -53,7 +62,7 @@ export function Timeline({ contactId }: { contactId: string }) {
         setLoading(false);
       }
     },
-    [contactId]
+    [basePath]
   );
 
   useEffect(() => {
