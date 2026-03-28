@@ -66,7 +66,7 @@ async def _write_audit(
         logger.exception("Failed to write audit log")
 
 
-@router.post("/", response_model=ServiceAccountRead)
+@router.post("", response_model=ServiceAccountRead)
 async def create_service_account(
     data: ServiceAccountCreate,
     request: Request,
@@ -115,7 +115,7 @@ async def create_service_account(
     )
 
 
-@router.get("/", response_model=list[ServiceAccountRead])
+@router.get("", response_model=list[ServiceAccountRead])
 async def list_service_accounts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
