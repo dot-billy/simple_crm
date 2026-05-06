@@ -240,9 +240,9 @@ export default function EmailPage() {
   return (
     <AppShell>
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-bold">Email</h2>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-2xl font-bold sm:text-3xl">Email</h2>
+          <div className="flex flex-wrap items-center gap-2">
             {syncStatus && (
               <span className="text-xs text-muted-foreground">
                 {syncStatus.is_configured ? (
@@ -304,6 +304,34 @@ export default function EmailPage() {
                       required
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Variables</Label>
+                    <div className="flex flex-wrap gap-1">
+                      {[
+                        "{{contact.first_name}}",
+                        "{{contact.last_name}}",
+                        "{{contact.email}}",
+                        "{{company.name}}",
+                        "{{deal.title}}",
+                        "{{deal.value}}",
+                        "{{user.full_name}}",
+                      ].map((v) => (
+                        <Badge
+                          key={v}
+                          variant="secondary"
+                          className="cursor-pointer hover:bg-primary/20"
+                          onClick={() =>
+                            setComposeForm({
+                              ...composeForm,
+                              body_html: composeForm.body_html + v,
+                            })
+                          }
+                        >
+                          {v}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -324,12 +352,12 @@ export default function EmailPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b">
+        <div className="flex gap-1 overflow-x-auto border-b">
           {tabs.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              className={`flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors sm:px-4 sm:text-sm ${
                 activeTab === tab.key
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -505,6 +533,35 @@ export default function EmailPage() {
                         onChange={(e) => setTemplateForm({ ...templateForm, body_html: e.target.value })}
                         required
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Variables</Label>
+                      <p className="text-xs text-muted-foreground">Click to insert at end of body</p>
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          "{{contact.first_name}}",
+                          "{{contact.last_name}}",
+                          "{{contact.email}}",
+                          "{{company.name}}",
+                          "{{deal.title}}",
+                          "{{deal.value}}",
+                          "{{user.full_name}}",
+                        ].map((v) => (
+                          <Badge
+                            key={v}
+                            variant="secondary"
+                            className="cursor-pointer hover:bg-primary/20"
+                            onClick={() =>
+                              setTemplateForm({
+                                ...templateForm,
+                                body_html: templateForm.body_html + v,
+                              })
+                            }
+                          >
+                            {v}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
                     <Button type="submit" className="w-full">Save Template</Button>
                   </form>

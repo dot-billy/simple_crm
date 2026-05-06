@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_scope
 from app.database import get_db
 from app.models import Task, User, UserRole
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
@@ -20,7 +20,7 @@ async def list_tasks(
     contact_id: UUID | None = Query(None),
     deal_id: UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("tasks:read")),
 ):
     query = select(Task)
     if current_user.role == UserRole.USER:
@@ -44,7 +44,7 @@ async def list_tasks(
 
 
 @router.post("", response_model=TaskRead)
-async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("tasks:write"))):
     task = Task(**data.model_dump())
     if task.assigned_to is None:
         task.assigned_to = current_user.id
@@ -55,7 +55,7 @@ async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db), curr
 
 
 @router.patch("/{task_id}", response_model=TaskRead)
-async def update_task(task_id: UUID, data: TaskUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def update_task(task_id: UUID, data: TaskUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("tasks:write"))):
     query = select(Task).where(Task.id == task_id)
     if current_user.role == UserRole.USER:
         query = query.where(Task.assigned_to == current_user.id)
@@ -71,7 +71,7 @@ async def update_task(task_id: UUID, data: TaskUpdate, db: AsyncSession = Depend
 
 
 @router.delete("/{task_id}")
-async def delete_task(task_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_task(task_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("tasks:write"))):
     query = select(Task).where(Task.id == task_id)
     if current_user.role == UserRole.USER:
         query = query.where(Task.assigned_to == current_user.id)

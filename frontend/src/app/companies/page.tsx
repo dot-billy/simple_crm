@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { apiFetch } from "@/lib/api";
-import { Plus, Search, Trash2 } from "lucide-react";
+import { apiFetch, apiUpload } from "@/lib/api";
+import { Plus, Search, Download, Upload, Trash2 } from "lucide-react";
 
 interface Company {
   id: string;
@@ -55,11 +56,42 @@ export default function CompaniesPage() {
     load();
   }
 
+  async function handleExport() {
+    const res = await fetch(
+      "/api/companies/export/csv",
+      { credentials: "include" }
+    );
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "companies.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await apiUpload("/api/companies/import/csv", file);
+    load();
+  }
+
   return (
     <AppShell>
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-bold">Companies</h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-2xl font-bold sm:text-3xl">Companies</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="mr-1 h-4 w-4" /> Export
+            </Button>
+            <label>
+              <Button variant="outline" size="sm" asChild>
+                <span><Upload className="mr-1 h-4 w-4" /> Import</span>
+              </Button>
+              <input type="file" accept=".csv" className="hidden" onChange={handleImport} />
+            </label>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <Button size="sm"><Plus className="mr-1 h-4 w-4" /> Add Company</Button>
@@ -71,7 +103,7 @@ export default function CompaniesPage() {
                   <Label>Company Name</Label>
                   <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Domain</Label>
                     <Input value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="example.com" />
@@ -81,7 +113,7 @@ export default function CompaniesPage() {
                     <Input value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Size</Label>
                     <Input value={form.size} onChange={(e) => setForm({ ...form, size: e.target.value })} placeholder="e.g. 50-100" />
@@ -95,6 +127,7 @@ export default function CompaniesPage() {
               </form>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
         <div className="relative">
@@ -104,7 +137,8 @@ export default function CompaniesPage() {
 
         <Card>
           <CardContent className="p-0">
-            <table className="w-full">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px]">
               <thead>
                 <tr className="border-b text-left text-sm text-muted-foreground">
                   <th className="p-4">Name</th>
@@ -118,7 +152,7 @@ export default function CompaniesPage() {
               <tbody>
                 {data?.items.map((c) => (
                   <tr key={c.id} className="border-b hover:bg-muted/50">
-                    <td className="p-4 font-medium">{c.name}</td>
+                    <td className="p-4 font-medium"><Link href={`/companies/${c.id}`} className="text-primary hover:underline">{c.name}</Link></td>
                     <td className="p-4 text-sm">{c.domain || "-"}</td>
                     <td className="p-4 text-sm">{c.industry || "-"}</td>
                     <td className="p-4 text-sm">{c.size || "-"}</td>
@@ -139,6 +173,7 @@ export default function CompaniesPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </CardContent>
         </Card>
 

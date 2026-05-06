@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import urllib.parse
 from uuid import UUID
 
@@ -16,6 +17,9 @@ from app.config import settings
 from app.database import get_db
 from app.gmail_service import send_email, sync_user_gmail, verify_tracking_signature
 from app.models import (
+    Company,
+    Contact,
+    Deal,
     EmailMessage,
     EmailTemplate,
     EmailTrackingEvent,
@@ -42,6 +46,49 @@ limiter = Limiter(key_func=get_remote_address)
 TRACKING_PIXEL = base64.b64decode(
     "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 )
+
+TEMPLATE_VARIABLES = {
+    "contact": ["first_name", "last_name", "email", "phone", "job_title"],
+    "company": ["name", "domain", "industry", "size"],
+    "deal": ["title", "value", "currency", "stage"],
+    "user": ["full_name", "email"],
+}
+
+
+def _substitute_variables(
+    html: str,
+    contact=None,
+    deal=None,
+    company=None,
+    user=None,
+) -> str:
+    """Replace {{entity.field}} placeholders with actual values."""
+    entities = {
+        "contact": contact,
+        "deal": deal,
+        "company": company,
+        "user": user,
+    }
+
+    def replacer(match):
+        entity_name = match.group(1)
+        field_name = match.group(2)
+        obj = entities.get(entity_name)
+        if obj is None:
+            return ""
+        value = getattr(obj, field_name, None)
+        return str(value) if value is not None else ""
+
+    return re.sub(r"\{\{(\w+)\.(\w+)\}\}", replacer, html)
+
+
+# --- Template Variables ---
+
+@router.get("/template-variables")
+async def get_template_variables(
+    current_user: User = Depends(get_current_user),
+):
+    return TEMPLATE_VARIABLES
 
 
 # --- Sync ---
@@ -145,13 +192,39 @@ async def send(
 ):
     if not settings.GOOGLE_SERVICE_ACCOUNT_FILE:
         raise HTTPException(status_code=400, detail="Gmail integration not configured")
+
+    # Load related entities for template variable substitution
+    contact = None
+    deal = None
+    company = None
+    if data.contact_id:
+        result = await db.execute(select(Contact).where(Contact.id == data.contact_id))
+        contact = result.scalar_one_or_none()
+    if data.deal_id:
+        result = await db.execute(select(Deal).where(Deal.id == data.deal_id))
+        deal = result.scalar_one_or_none()
+        if deal and deal.company_id:
+            result = await db.execute(select(Company).where(Company.id == deal.company_id))
+            company = result.scalar_one_or_none()
+    if not company and contact and contact.company_id:
+        result = await db.execute(select(Company).where(Company.id == contact.company_id))
+        company = result.scalar_one_or_none()
+
+    body_html = _substitute_variables(
+        data.body_html,
+        contact=contact,
+        deal=deal,
+        company=company,
+        user=current_user,
+    )
+
     email = await send_email(
         db=db,
         user_email=current_user.email,
         user_id=current_user.id,
         to=data.to,
         subject=data.subject,
-        body_html=data.body_html,
+        body_html=body_html,
         cc=data.cc,
         contact_id=data.contact_id,
         deal_id=data.deal_id,

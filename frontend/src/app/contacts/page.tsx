@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { apiFetch, apiUpload } from "@/lib/api";
-import { Plus, Search, Download, Upload, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Search, Download, Upload, Trash2, Clock, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
+import { Timeline } from "@/components/timeline";
 
 interface Contact {
   id: string;
@@ -35,14 +38,44 @@ export default function ContactsPage() {
   const [data, setData] = useState<PaginatedContacts | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [tagFilter, setTagFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [tags, setTags] = useState<Array<{ id: string; name: string; color: string }>>([]);
+  const [sources, setSources] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [timelineContactId, setTimelineContactId] = useState<string | null>(null);
   const [form, setForm] = useState({ first_name: "", last_name: "", email: "", phone: "", job_title: "", source: "" });
 
   const load = useCallback(() => {
-    apiFetch<PaginatedContacts>(`/api/contacts?page=${page}&search=${encodeURIComponent(search)}`).then(setData);
-  }, [page, search]);
+    const params = new URLSearchParams({
+      page: String(page),
+      search,
+      sort_by: sortBy,
+      sort_dir: sortDir,
+    });
+    if (tagFilter) params.set("tag_id", tagFilter);
+    if (sourceFilter) params.set("source", sourceFilter);
+    apiFetch<PaginatedContacts>(`/api/contacts?${params}`).then(setData);
+  }, [page, search, sortBy, sortDir, tagFilter, sourceFilter]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    apiFetch<Array<{ id: string; name: string; color: string }>>("/api/tags").then(setTags);
+    apiFetch<string[]>("/api/contacts/sources").then(setSources);
+  }, []);
+
+  function handleSort(column: string) {
+    if (sortBy === column) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(column);
+      setSortDir("asc");
+    }
+    setPage(1);
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -59,7 +92,7 @@ export default function ContactsPage() {
 
   async function handleExport() {
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/contacts/export/csv`,
+      "/api/contacts/export/csv",
       { credentials: "include" }
     );
     const blob = await res.blob();
@@ -81,9 +114,9 @@ export default function ContactsPage() {
   return (
     <AppShell>
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-bold">Contacts</h2>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-2xl font-bold sm:text-3xl">Contacts</h2>
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download className="mr-1 h-4 w-4" /> Export
             </Button>
@@ -102,7 +135,7 @@ export default function ContactsPage() {
                   <DialogTitle>New Contact</DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleCreate} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>First Name</Label>
                       <Input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} required />
@@ -116,7 +149,7 @@ export default function ContactsPage() {
                     <Label>Email</Label>
                     <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Phone</Label>
                       <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
@@ -147,23 +180,64 @@ export default function ContactsPage() {
           />
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={tagFilter || "all"} onValueChange={(v) => { setTagFilter(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All tags" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All tags</SelectItem>
+              {tags.map((t) => (
+                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={sourceFilter || "all"} onValueChange={(v) => { setSourceFilter(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All sources" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All sources</SelectItem>
+              {sources.map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <Card>
           <CardContent className="p-0">
-            <table className="w-full">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px]">
               <thead>
                 <tr className="border-b text-left text-sm text-muted-foreground">
-                  <th className="p-4">Name</th>
-                  <th className="p-4">Email</th>
+                  <th className="p-4">
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("last_name")}>
+                      Name
+                      {sortBy === "last_name" ? (sortDir === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />) : <ArrowUpDown className="h-4 w-4 opacity-40" />}
+                    </button>
+                  </th>
+                  <th className="p-4">
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("email")}>
+                      Email
+                      {sortBy === "email" ? (sortDir === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />) : <ArrowUpDown className="h-4 w-4 opacity-40" />}
+                    </button>
+                  </th>
                   <th className="p-4">Phone</th>
-                  <th className="p-4">Job Title</th>
+                  <th className="p-4">
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("job_title")}>
+                      Job Title
+                      {sortBy === "job_title" ? (sortDir === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />) : <ArrowUpDown className="h-4 w-4 opacity-40" />}
+                    </button>
+                  </th>
                   <th className="p-4">Tags</th>
-                  <th className="p-4 w-16"></th>
+                  <th className="p-4 w-24"></th>
                 </tr>
               </thead>
               <tbody>
                 {data?.items.map((c) => (
                   <tr key={c.id} className="border-b hover:bg-muted/50">
-                    <td className="p-4 font-medium">{c.first_name} {c.last_name}</td>
+                    <td className="p-4 font-medium"><Link href={`/contacts/${c.id}`} className="text-primary hover:underline">{c.first_name} {c.last_name}</Link></td>
                     <td className="p-4 text-sm">{c.email || "-"}</td>
                     <td className="p-4 text-sm">{c.phone || "-"}</td>
                     <td className="p-4 text-sm">{c.job_title || "-"}</td>
@@ -177,9 +251,14 @@ export default function ContactsPage() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <Button variant="ghost" size="icon" onClick={() => handleDelete(c.id)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => setTimelineContactId(c.id)} title="Timeline">
+                          <Clock className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(c.id)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -188,6 +267,7 @@ export default function ContactsPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </CardContent>
         </Card>
 
@@ -200,6 +280,14 @@ export default function ContactsPage() {
             </div>
           </div>
         )}
+        <Dialog open={!!timelineContactId} onOpenChange={(open) => { if (!open) setTimelineContactId(null); }}>
+          <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Contact Timeline</DialogTitle>
+            </DialogHeader>
+            {timelineContactId && <Timeline contactId={timelineContactId} />}
+          </DialogContent>
+        </Dialog>
       </div>
     </AppShell>
   );
