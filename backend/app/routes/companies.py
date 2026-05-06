@@ -9,10 +9,18 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
-from app.models import Activity, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, User, UserRole
+from app.models import Activity, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, User, UserRole, company_tags
 from app.schemas import CompanyCreate, CompanyProfile, CompanyRead, CompanyStats, CompanyUpdate, ContactRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead
 
 router = APIRouter(prefix="/api/companies", tags=["companies"])
+
+
+SORTABLE_COLUMNS = {
+    "name": Company.name,
+    "domain": Company.domain,
+    "industry": Company.industry,
+    "created_at": Company.created_at,
+}
 
 
 def _apply_ownership_filter(query, user: User):
@@ -26,6 +34,10 @@ async def list_companies(
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=100),
     search: str = Query(""),
+    sort_by: str = Query("created_at"),
+    sort_dir: str = Query("desc"),
+    tag_id: str = Query(""),
+    industry: str = Query(""),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_scope("companies:read")),
 ):
@@ -35,9 +47,15 @@ async def list_companies(
         query = query.where(
             (Company.name.ilike(f"%{search}%")) | (Company.domain.ilike(f"%{search}%"))
         )
+    if tag_id:
+        query = query.join(company_tags).where(company_tags.c.tag_id == tag_id)
+    if industry:
+        query = query.where(Company.industry == industry)
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar() or 0
-    query = query.order_by(Company.created_at.desc()).offset((page - 1) * per_page).limit(per_page)
+    col = SORTABLE_COLUMNS.get(sort_by, Company.created_at)
+    order = col.asc().nullslast() if sort_dir == "asc" else col.desc().nullslast()
+    query = query.order_by(order).offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
     items = result.scalars().all()
     return {
@@ -45,6 +63,18 @@ async def list_companies(
         "total": total, "page": page, "per_page": per_page,
         "pages": (total + per_page - 1) // per_page if per_page else 0,
     }
+
+
+@router.get("/industries", response_model=list[str])
+async def list_company_industries(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("companies:read")),
+):
+    query = select(Company.industry).where(Company.industry.isnot(None), Company.industry != "")
+    query = _apply_ownership_filter(query, current_user)
+    query = query.distinct().order_by(Company.industry)
+    result = await db.execute(query)
+    return [row[0] for row in result.all()]
 
 
 @router.get("/{company_id}", response_model=CompanyRead)

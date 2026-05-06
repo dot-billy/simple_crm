@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { apiFetch, apiUpload } from "@/lib/api";
-import { Plus, Search, Download, Upload, Trash2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Search, Download, Upload, Trash2, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 
 interface Company {
   id: string;
@@ -34,14 +35,43 @@ export default function CompaniesPage() {
   const [data, setData] = useState<PaginatedCompanies | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [tagFilter, setTagFilter] = useState("");
+  const [industryFilter, setIndustryFilter] = useState("");
+  const [tags, setTags] = useState<Array<{ id: string; name: string; color: string }>>([]);
+  const [industries, setIndustries] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ name: "", domain: "", industry: "", size: "", phone: "" });
 
   const load = useCallback(() => {
-    apiFetch<PaginatedCompanies>(`/api/companies?page=${page}&search=${encodeURIComponent(search)}`).then(setData);
-  }, [page, search]);
+    const params = new URLSearchParams({
+      page: String(page),
+      search,
+      sort_by: sortBy,
+      sort_dir: sortDir,
+    });
+    if (tagFilter) params.set("tag_id", tagFilter);
+    if (industryFilter) params.set("industry", industryFilter);
+    apiFetch<PaginatedCompanies>(`/api/companies?${params}`).then(setData);
+  }, [page, search, sortBy, sortDir, tagFilter, industryFilter]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    apiFetch<Array<{ id: string; name: string; color: string }>>("/api/tags").then(setTags);
+    apiFetch<string[]>("/api/companies/industries").then(setIndustries);
+  }, []);
+
+  function handleSort(column: string) {
+    if (sortBy === column) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(column);
+      setSortDir("asc");
+    }
+    setPage(1);
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -135,15 +165,55 @@ export default function CompaniesPage() {
           <Input placeholder="Search companies..." className="pl-10" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={tagFilter || "all"} onValueChange={(v) => { setTagFilter(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All tags" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All tags</SelectItem>
+              {tags.map((t) => (
+                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={industryFilter || "all"} onValueChange={(v) => { setIndustryFilter(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All industries" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All industries</SelectItem>
+              {industries.map((i) => (
+                <SelectItem key={i} value={i}>{i}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <Card>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[600px]">
               <thead>
                 <tr className="border-b text-left text-sm text-muted-foreground">
-                  <th className="p-4">Name</th>
-                  <th className="p-4">Domain</th>
-                  <th className="p-4">Industry</th>
+                  <th className="p-4">
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("name")}>
+                      Name
+                      {sortBy === "name" ? (sortDir === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />) : <ArrowUpDown className="h-4 w-4 opacity-40" />}
+                    </button>
+                  </th>
+                  <th className="p-4">
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("domain")}>
+                      Domain
+                      {sortBy === "domain" ? (sortDir === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />) : <ArrowUpDown className="h-4 w-4 opacity-40" />}
+                    </button>
+                  </th>
+                  <th className="p-4">
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("industry")}>
+                      Industry
+                      {sortBy === "industry" ? (sortDir === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />) : <ArrowUpDown className="h-4 w-4 opacity-40" />}
+                    </button>
+                  </th>
                   <th className="p-4">Size</th>
                   <th className="p-4">Tags</th>
                   <th className="p-4 w-16"></th>
