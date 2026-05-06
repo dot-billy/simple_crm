@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { apiFetch, apiUpload } from "@/lib/api";
-import { Plus, Search, Download, Upload, Trash2, Clock } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Search, Download, Upload, Trash2, Clock, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { Timeline } from "@/components/timeline";
 
 interface Contact {
@@ -37,15 +38,44 @@ export default function ContactsPage() {
   const [data, setData] = useState<PaginatedContacts | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [tagFilter, setTagFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [tags, setTags] = useState<Array<{ id: string; name: string; color: string }>>([]);
+  const [sources, setSources] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [timelineContactId, setTimelineContactId] = useState<string | null>(null);
   const [form, setForm] = useState({ first_name: "", last_name: "", email: "", phone: "", job_title: "", source: "" });
 
   const load = useCallback(() => {
-    apiFetch<PaginatedContacts>(`/api/contacts?page=${page}&search=${encodeURIComponent(search)}`).then(setData);
-  }, [page, search]);
+    const params = new URLSearchParams({
+      page: String(page),
+      search,
+      sort_by: sortBy,
+      sort_dir: sortDir,
+    });
+    if (tagFilter) params.set("tag_id", tagFilter);
+    if (sourceFilter) params.set("source", sourceFilter);
+    apiFetch<PaginatedContacts>(`/api/contacts?${params}`).then(setData);
+  }, [page, search, sortBy, sortDir, tagFilter, sourceFilter]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    apiFetch<Array<{ id: string; name: string; color: string }>>("/api/tags").then(setTags);
+    apiFetch<string[]>("/api/contacts/sources").then(setSources);
+  }, []);
+
+  function handleSort(column: string) {
+    if (sortBy === column) {
+      setSortDir(sortDir === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(column);
+      setSortDir("asc");
+    }
+    setPage(1);
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -150,16 +180,56 @@ export default function ContactsPage() {
           />
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={tagFilter || "all"} onValueChange={(v) => { setTagFilter(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All tags" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All tags</SelectItem>
+              {tags.map((t) => (
+                <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={sourceFilter || "all"} onValueChange={(v) => { setSourceFilter(v === "all" ? "" : v); setPage(1); }}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="All sources" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All sources</SelectItem>
+              {sources.map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <Card>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[600px]">
               <thead>
                 <tr className="border-b text-left text-sm text-muted-foreground">
-                  <th className="p-4">Name</th>
-                  <th className="p-4">Email</th>
+                  <th className="p-4">
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("last_name")}>
+                      Name
+                      {sortBy === "last_name" ? (sortDir === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />) : <ArrowUpDown className="h-4 w-4 opacity-40" />}
+                    </button>
+                  </th>
+                  <th className="p-4">
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("email")}>
+                      Email
+                      {sortBy === "email" ? (sortDir === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />) : <ArrowUpDown className="h-4 w-4 opacity-40" />}
+                    </button>
+                  </th>
                   <th className="p-4">Phone</th>
-                  <th className="p-4">Job Title</th>
+                  <th className="p-4">
+                    <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("job_title")}>
+                      Job Title
+                      {sortBy === "job_title" ? (sortDir === "asc" ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />) : <ArrowUpDown className="h-4 w-4 opacity-40" />}
+                    </button>
+                  </th>
                   <th className="p-4">Tags</th>
                   <th className="p-4 w-24"></th>
                 </tr>

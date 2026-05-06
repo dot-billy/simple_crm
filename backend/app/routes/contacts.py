@@ -10,10 +10,19 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user, require_scope
 from app.database import get_db
-from app.models import Activity, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole
+from app.models import Activity, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole, contact_tags
 from app.schemas import ContactCreate, ContactProfile, ContactRead, ContactStats, ContactUpdate, CompanyRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead, TaskRead
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
+
+
+SORTABLE_COLUMNS = {
+    "first_name": Contact.first_name,
+    "last_name": Contact.last_name,
+    "email": Contact.email,
+    "job_title": Contact.job_title,
+    "created_at": Contact.created_at,
+}
 
 
 def _apply_ownership_filter(query, user: User):
@@ -27,6 +36,10 @@ async def list_contacts(
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=100),
     search: str = Query(""),
+    sort_by: str = Query("created_at"),
+    sort_dir: str = Query("desc"),
+    tag_id: str = Query(""),
+    source: str = Query(""),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_scope("contacts:read")),
 ):
@@ -40,10 +53,18 @@ async def list_contacts(
             | (Contact.email.ilike(f"%{search}%"))
         )
 
+    if tag_id:
+        query = query.join(contact_tags).where(contact_tags.c.tag_id == tag_id)
+
+    if source:
+        query = query.where(Contact.source == source)
+
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar() or 0
 
-    query = query.order_by(Contact.created_at.desc()).offset((page - 1) * per_page).limit(per_page)
+    col = SORTABLE_COLUMNS.get(sort_by, Contact.created_at)
+    order = col.asc().nullslast() if sort_dir == "asc" else col.desc().nullslast()
+    query = query.order_by(order).offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
     items = result.scalars().all()
 
@@ -54,6 +75,18 @@ async def list_contacts(
         "per_page": per_page,
         "pages": (total + per_page - 1) // per_page if per_page else 0,
     }
+
+
+@router.get("/sources", response_model=list[str])
+async def list_contact_sources(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("contacts:read")),
+):
+    query = select(Contact.source).where(Contact.source.isnot(None), Contact.source != "")
+    query = _apply_ownership_filter(query, current_user)
+    query = query.distinct().order_by(Contact.source)
+    result = await db.execute(query)
+    return [row[0] for row in result.all()]
 
 
 @router.get("/{contact_id}", response_model=ContactRead)
