@@ -40,7 +40,7 @@ export default function TasksPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ title: "", description: "", due_date: "" });
+  const [form, setForm] = useState({ title: "", description: "", due_date: "", recurrence_rule: "none", reminder_minutes_before: "" });
 
   const load = useCallback(() => {
     apiFetch<PaginatedTasks>(`/api/tasks?page=${page}&status=${statusFilter}`).then(setData);
@@ -50,12 +50,14 @@ export default function TasksPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    const body: Record<string, string> = { title: form.title };
+    const body: Record<string, string | number> = { title: form.title };
     if (form.description) body.description = form.description;
     if (form.due_date) body.due_date = new Date(form.due_date).toISOString();
+    if (form.recurrence_rule && form.recurrence_rule !== "none") body.recurrence_rule = form.recurrence_rule;
+    if (form.reminder_minutes_before) body.reminder_minutes_before = parseInt(form.reminder_minutes_before, 10);
     await apiFetch("/api/tasks", { method: "POST", body: JSON.stringify(body) });
     setDialogOpen(false);
-    setForm({ title: "", description: "", due_date: "" });
+    setForm({ title: "", description: "", due_date: "", recurrence_rule: "none", reminder_minutes_before: "" });
     load();
   }
 
@@ -104,6 +106,30 @@ export default function TasksPage() {
                   <div className="space-y-2">
                     <Label>Due Date</Label>
                     <Input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Recurrence</Label>
+                      <Select value={form.recurrence_rule} onValueChange={(v) => setForm({ ...form, recurrence_rule: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem value="daily">Daily</SelectItem>
+                          <SelectItem value="weekly">Weekly</SelectItem>
+                          <SelectItem value="monthly">Monthly</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Reminder (min before)</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={form.reminder_minutes_before}
+                        onChange={(e) => setForm({ ...form, reminder_minutes_before: e.target.value })}
+                        placeholder="e.g. 60"
+                      />
+                    </div>
                   </div>
                   <Button type="submit" className="w-full">Create Task</Button>
                 </form>

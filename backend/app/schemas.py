@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.models import AccountType, ActivityType, CustomFieldType, DealStage, EmailDirection, EmailTrackingEventType, TaskStatus, UserRole
+from app.models import AccountType, ActivityType, CustomFieldType, DealStage, EmailDirection, EmailTrackingEventType, TaskRecurrence, TaskStatus, UserRole
 
 
 # --- Auth ---
@@ -273,6 +273,9 @@ class TaskCreate(BaseModel):
     assigned_to: UUID | None = None
     contact_id: UUID | None = None
     deal_id: UUID | None = None
+    reminder_minutes_before: int | None = Field(None, ge=0)
+    recurrence_rule: TaskRecurrence = TaskRecurrence.NONE
+    parent_task_id: UUID | None = None
 
 
 class TaskRead(BaseModel):
@@ -284,6 +287,9 @@ class TaskRead(BaseModel):
     assigned_to: UUID | None = None
     contact_id: UUID | None = None
     deal_id: UUID | None = None
+    reminder_minutes_before: int | None = None
+    recurrence_rule: TaskRecurrence = TaskRecurrence.NONE
+    parent_task_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -298,6 +304,8 @@ class TaskUpdate(BaseModel):
     assigned_to: UUID | None = None
     contact_id: UUID | None = None
     deal_id: UUID | None = None
+    reminder_minutes_before: int | None = Field(None, ge=0)
+    recurrence_rule: TaskRecurrence | None = None
 
 
 # --- Custom Fields ---

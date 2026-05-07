@@ -53,6 +53,13 @@ class TaskStatus(str, enum.Enum):
     DONE = "done"
 
 
+class TaskRecurrence(str, enum.Enum):
+    NONE = "none"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
 class EmailDirection(str, enum.Enum):
     INBOUND = "inbound"
     OUTBOUND = "outbound"
@@ -250,6 +257,9 @@ class Task(Base):
     assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contact_id = Column(UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
     deal_id = Column(UUID(as_uuid=True), ForeignKey("deals.id", ondelete="SET NULL"), nullable=True)
+    reminder_minutes_before = Column(Integer, nullable=True)
+    recurrence_rule = Column(SAEnum(TaskRecurrence), nullable=False, default=TaskRecurrence.NONE)
+    parent_task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

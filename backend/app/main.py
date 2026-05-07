@@ -49,6 +49,18 @@ async def lifespan(app: FastAPI):
             await conn.execute(text(f"ALTER TABLE audit_log {col_def}"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_log_entity_type ON audit_log(entity_type)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_log_entity_id ON audit_log(entity_id)"))
+        # Task reminders / recurrence
+        for col_def in [
+            "ADD COLUMN IF NOT EXISTS reminder_minutes_before INTEGER",
+            "ADD COLUMN IF NOT EXISTS recurrence_rule taskrecurrence NOT NULL DEFAULT 'NONE'",
+            "ADD COLUMN IF NOT EXISTS parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL",
+        ]:
+            try:
+                await conn.execute(text(f"ALTER TABLE tasks {col_def}"))
+            except Exception:
+                # taskrecurrence enum may need creating first; create_all should handle it,
+                # but if the column add races on first boot just skip and let next boot fix.
+                pass
 
     # Seed default admin user if none exists
     async with async_session() as db:

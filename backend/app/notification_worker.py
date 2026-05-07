@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, exists, select
+from sqlalchemy import select
 
 from app.database import async_session
 from app.models import Notification, Task, TaskStatus
@@ -10,13 +10,15 @@ from app.models import Notification, Task, TaskStatus
 logger = logging.getLogger(__name__)
 
 DUE_SOON_INTERVAL_SECONDS = 900  # 15 minutes
-DUE_SOON_WINDOW_HOURS = 24
+DEFAULT_REMINDER_WINDOW_MINUTES = 24 * 60  # tasks without explicit reminder use 24h
 DUE_SOON_TITLE_PREFIX = "Task due soon"
 
 
 async def _scan_due_soon_tasks() -> int:
+    """Find tasks whose reminder window opens soon and create one notification each."""
     now = datetime.now(timezone.utc)
-    cutoff = now + timedelta(hours=DUE_SOON_WINDOW_HOURS)
+    # We pull a generous window and decide per-task using its reminder_minutes_before.
+    max_lead = timedelta(minutes=DEFAULT_REMINDER_WINDOW_MINUTES)
 
     async with async_session() as db:
         notif_exists = (
@@ -32,12 +34,16 @@ async def _scan_due_soon_tasks() -> int:
             Task.status != TaskStatus.DONE,
             Task.assigned_to.isnot(None),
             Task.due_date.isnot(None),
-            Task.due_date <= cutoff,
+            Task.due_date <= now + max_lead,
             Task.due_date > now,
             ~notif_exists,
         )
-        tasks = (await db.execute(query)).scalars().all()
-        for task in tasks:
+        candidates = (await db.execute(query)).scalars().all()
+        created = 0
+        for task in candidates:
+            lead_minutes = task.reminder_minutes_before or DEFAULT_REMINDER_WINDOW_MINUTES
+            if task.due_date - now > timedelta(minutes=lead_minutes):
+                continue
             db.add(
                 Notification(
                     user_id=task.assigned_to,
@@ -47,9 +53,10 @@ async def _scan_due_soon_tasks() -> int:
                     entity_id=task.id,
                 )
             )
-        if tasks:
+            created += 1
+        if created:
             await db.commit()
-        return len(tasks)
+        return created
 
 
 async def notification_worker_loop():
