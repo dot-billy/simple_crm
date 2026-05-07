@@ -10,7 +10,7 @@ from app.auth import get_current_user, require_scope
 from app.database import get_db
 from app.models import AuditEventType, Task, TaskRecurrence, TaskStatus, User, UserRole
 from app.routes.notifications import add_notification
-from app.schemas import TaskCreate, TaskRead, TaskUpdate
+from app.schemas import BulkAction, TaskCreate, TaskRead, TaskUpdate
 
 
 _RECURRENCE_DELTA = {
@@ -152,3 +152,33 @@ async def delete_task(task_id: UUID, db: AsyncSession = Depends(get_db), current
     log_mutation(db, event_type=AuditEventType.TASK_DELETED, user=current_user, entity_type="task", entity_id=task_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/bulk")
+async def bulk_tasks(
+    data: BulkAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("tasks:write")),
+):
+    query = select(Task).where(Task.id.in_(data.ids))
+    if current_user.role == UserRole.USER:
+        query = query.where(Task.assigned_to == current_user.id)
+    tasks = (await db.execute(query)).scalars().all()
+    affected = 0
+    for t in tasks:
+        before = {col.name: getattr(t, col.name) for col in t.__table__.columns}
+        if data.action == "delete":
+            tid = t.id
+            await db.delete(t)
+            log_mutation(db, event_type=AuditEventType.TASK_DELETED, user=current_user, entity_type="task", entity_id=tid, before=before)
+        elif data.action == "set_status" and data.status:
+            t.status = data.status
+            log_mutation(db, event_type=AuditEventType.TASK_UPDATED, user=current_user, entity_type="task", entity_id=t.id, before=before, after=t)
+        elif data.action == "set_owner":
+            t.assigned_to = data.owner_id
+            log_mutation(db, event_type=AuditEventType.TASK_UPDATED, user=current_user, entity_type="task", entity_id=t.id, before=before, after=t)
+        else:
+            continue
+        affected += 1
+    await db.commit()
+    return {"affected": affected}

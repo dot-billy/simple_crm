@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch, apiUpload } from "@/lib/api";
 import { Plus, Trash2, GripVertical, Download, Upload } from "lucide-react";
+import { BulkActionBar } from "@/components/bulk-action-bar";
 import {
   DndContext,
   DragEndEvent,
@@ -158,6 +159,7 @@ export default function DealsPage() {
   const [form, setForm] = useState({ title: "", value: "0", stage: "lead" });
   const [viewMode, setViewMode] = useState<"table" | "pipeline">("pipeline");
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -375,12 +377,31 @@ export default function DealsPage() {
             </DragOverlay>
           </DndContext>
         ) : (
+          <>
+          <BulkActionBar
+            entity="deals"
+            selectedIds={selectedIds}
+            onClear={() => setSelectedIds([])}
+            onApplied={load}
+            actions={["set_stage", "add_tag", "remove_tag", "delete"]}
+          />
           <Card>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
               <table className="w-full min-w-[600px]">
                 <thead>
                   <tr className="border-b text-left text-sm text-muted-foreground">
+                    <th className="p-4 w-10">
+                      <input
+                        type="checkbox"
+                        checked={!!data && data.items.length > 0 && data.items.every((d) => selectedIds.includes(d.id))}
+                        onChange={(e) => {
+                          if (!data) return;
+                          if (e.target.checked) setSelectedIds(Array.from(new Set([...selectedIds, ...data.items.map((d) => d.id)])));
+                          else setSelectedIds(selectedIds.filter((id) => !data.items.some((d) => d.id === id)));
+                        }}
+                      />
+                    </th>
                     <th className="p-4">Title</th>
                     <th className="p-4">Value</th>
                     <th className="p-4">Stage</th>
@@ -393,6 +414,16 @@ export default function DealsPage() {
                     const stageInfo = stages.find((s) => s.value === d.stage);
                     return (
                       <tr key={d.id} className="border-b hover:bg-muted/50">
+                        <td className="p-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(d.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedIds([...selectedIds, d.id]);
+                              else setSelectedIds(selectedIds.filter((id) => id !== d.id));
+                            }}
+                          />
+                        </td>
                         <td className="p-4 font-medium">
                           <Link href={`/deals/${d.id}`} className="text-primary hover:underline">{d.title}</Link>
                         </td>
@@ -410,13 +441,14 @@ export default function DealsPage() {
                     );
                   })}
                   {data?.items.length === 0 && (
-                    <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No deals found</td></tr>
+                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No deals found</td></tr>
                   )}
                 </tbody>
               </table>
               </div>
             </CardContent>
           </Card>
+          </>
         )}
       </div>
     </AppShell>

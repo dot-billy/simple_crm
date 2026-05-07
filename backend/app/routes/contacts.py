@@ -12,7 +12,7 @@ from app.audit import log_mutation
 from app.auth import get_current_user, require_scope
 from app.database import get_db
 from app.models import Activity, AuditEventType, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole, contact_tags
-from app.schemas import ContactCreate, ContactProfile, ContactRead, ContactStats, ContactUpdate, CompanyRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead, TaskRead
+from app.schemas import BulkAction, ContactCreate, ContactProfile, ContactRead, ContactStats, ContactUpdate, CompanyRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead, TaskRead
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
 
@@ -174,6 +174,40 @@ async def delete_contact(
     log_mutation(db, event_type=AuditEventType.CONTACT_DELETED, user=current_user, entity_type="contact", entity_id=contact_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/bulk")
+async def bulk_contacts(
+    data: BulkAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("contacts:write")),
+):
+    query = select(Contact).options(selectinload(Contact.tags)).where(Contact.id.in_(data.ids))
+    query = _apply_ownership_filter(query, current_user)
+    contacts = (await db.execute(query)).scalars().all()
+    affected = 0
+    for c in contacts:
+        before = {col.name: getattr(c, col.name) for col in c.__table__.columns}
+        if data.action == "delete":
+            cid = c.id
+            await db.delete(c)
+            log_mutation(db, event_type=AuditEventType.CONTACT_DELETED, user=current_user, entity_type="contact", entity_id=cid, before=before)
+        elif data.action == "add_tag" and data.tag_id:
+            tag = (await db.execute(select(Tag).where(Tag.id == data.tag_id))).scalar_one_or_none()
+            if tag and tag not in c.tags:
+                c.tags.append(tag)
+                log_mutation(db, event_type=AuditEventType.CONTACT_UPDATED, user=current_user, entity_type="contact", entity_id=c.id, before=before, after=c)
+        elif data.action == "remove_tag" and data.tag_id:
+            c.tags = [t for t in c.tags if t.id != data.tag_id]
+            log_mutation(db, event_type=AuditEventType.CONTACT_UPDATED, user=current_user, entity_type="contact", entity_id=c.id, before=before, after=c)
+        elif data.action == "set_owner":
+            c.owner_id = data.owner_id
+            log_mutation(db, event_type=AuditEventType.CONTACT_UPDATED, user=current_user, entity_type="contact", entity_id=c.id, before=before, after=c)
+        else:
+            continue
+        affected += 1
+    await db.commit()
+    return {"affected": affected}
 
 
 @router.get("/{contact_id}/profile", response_model=ContactProfile)

@@ -191,6 +191,15 @@ class CompanyUpdate(BaseModel):
 
 # --- Deal ---
 
+class BulkAction(BaseModel):
+    action: str  # delete | add_tag | remove_tag | set_owner | set_stage | set_status
+    ids: list[UUID] = Field(min_length=1, max_length=500)
+    tag_id: UUID | None = None
+    owner_id: UUID | None = None
+    stage: DealStage | None = None
+    status: TaskStatus | None = None
+
+
 _STAGE_DEFAULT_PROBABILITY = {
     "lead": 10.0,
     "qualified": 25.0,

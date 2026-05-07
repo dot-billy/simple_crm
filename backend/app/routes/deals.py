@@ -15,6 +15,7 @@ from app.models import Activity, ActivityType, AuditEventType, Company, Contact,
 from app.routes.notifications import add_notification
 from app.schemas import (
     ActivityRead,
+    BulkAction,
     CompanyRead,
     ContactRead,
     CustomFieldDefinitionRead,
@@ -250,6 +251,44 @@ async def get_deal_profile(
         custom_field_definitions=[],
         stats=stats,
     )
+
+
+@router.post("/bulk")
+async def bulk_deals(
+    data: BulkAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("deals:write")),
+):
+    query = select(Deal).options(selectinload(Deal.tags)).where(Deal.id.in_(data.ids))
+    query = _apply_ownership_filter(query, current_user)
+    deals = (await db.execute(query)).scalars().all()
+    affected = 0
+    for d in deals:
+        before = {col.name: getattr(d, col.name) for col in d.__table__.columns}
+        if data.action == "delete":
+            did = d.id
+            await db.delete(d)
+            log_mutation(db, event_type=AuditEventType.DEAL_DELETED, user=current_user, entity_type="deal", entity_id=did, before=before)
+        elif data.action == "add_tag" and data.tag_id:
+            tag = (await db.execute(select(Tag).where(Tag.id == data.tag_id))).scalar_one_or_none()
+            if tag and tag not in d.tags:
+                d.tags.append(tag)
+                log_mutation(db, event_type=AuditEventType.DEAL_UPDATED, user=current_user, entity_type="deal", entity_id=d.id, before=before, after=d)
+        elif data.action == "remove_tag" and data.tag_id:
+            d.tags = [t for t in d.tags if t.id != data.tag_id]
+            log_mutation(db, event_type=AuditEventType.DEAL_UPDATED, user=current_user, entity_type="deal", entity_id=d.id, before=before, after=d)
+        elif data.action == "set_owner":
+            d.owner_id = data.owner_id
+            log_mutation(db, event_type=AuditEventType.DEAL_UPDATED, user=current_user, entity_type="deal", entity_id=d.id, before=before, after=d)
+        elif data.action == "set_stage" and data.stage:
+            old = d.stage
+            d.stage = data.stage
+            log_mutation(db, event_type=AuditEventType.DEAL_STAGE_CHANGED, user=current_user, entity_type="deal", entity_id=d.id, before={"stage": old.value}, after={"stage": data.stage.value})
+        else:
+            continue
+        affected += 1
+    await db.commit()
+    return {"affected": affected}
 
 
 def _sanitize_csv_value(val: str | None) -> str | None:

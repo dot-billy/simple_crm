@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch } from "@/lib/api";
 import { Plus, Trash2, CheckCircle2, Circle, Clock } from "lucide-react";
+import { BulkActionBar } from "@/components/bulk-action-bar";
 
 interface Task {
   id: string;
@@ -41,6 +42,7 @@ export default function TasksPage() {
   const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", due_date: "", recurrence_rule: "none", reminder_minutes_before: "" });
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const load = useCallback(() => {
     apiFetch<PaginatedTasks>(`/api/tasks?page=${page}&status=${statusFilter}`).then(setData);
@@ -138,6 +140,14 @@ export default function TasksPage() {
           </div>
         </div>
 
+        <BulkActionBar
+          entity="tasks"
+          selectedIds={selectedIds}
+          onClear={() => setSelectedIds([])}
+          onApplied={load}
+          actions={["set_status", "delete"]}
+        />
+
         <div className="space-y-2">
           {data?.items.map((task) => {
             const config = statusConfig[task.status] || statusConfig.todo;
@@ -145,6 +155,14 @@ export default function TasksPage() {
             return (
               <Card key={task.id}>
                 <CardContent className="flex items-center gap-4 p-4">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(task.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) setSelectedIds([...selectedIds, task.id]);
+                      else setSelectedIds(selectedIds.filter((id) => id !== task.id));
+                    }}
+                  />
                   <button onClick={() => {
                     const next = task.status === "todo" ? "in_progress" : task.status === "in_progress" ? "done" : "todo";
                     handleStatusChange(task.id, next);

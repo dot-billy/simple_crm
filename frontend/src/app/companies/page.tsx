@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { apiFetch, apiUpload } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Search, Download, Upload, Trash2, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
+import { BulkActionBar } from "@/components/bulk-action-bar";
 
 interface Company {
   id: string;
@@ -43,6 +44,7 @@ export default function CompaniesPage() {
   const [industries, setIndustries] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ name: "", domain: "", industry: "", size: "", phone: "" });
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const load = useCallback(() => {
     const params = new URLSearchParams({
@@ -190,12 +192,31 @@ export default function CompaniesPage() {
           </Select>
         </div>
 
+        <BulkActionBar
+          entity="companies"
+          selectedIds={selectedIds}
+          onClear={() => setSelectedIds([])}
+          onApplied={load}
+          actions={["add_tag", "remove_tag", "delete"]}
+        />
+
         <Card>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[600px]">
               <thead>
                 <tr className="border-b text-left text-sm text-muted-foreground">
+                  <th className="p-4 w-10">
+                    <input
+                      type="checkbox"
+                      checked={!!data && data.items.length > 0 && data.items.every((c) => selectedIds.includes(c.id))}
+                      onChange={(e) => {
+                        if (!data) return;
+                        if (e.target.checked) setSelectedIds(Array.from(new Set([...selectedIds, ...data.items.map((c) => c.id)])));
+                        else setSelectedIds(selectedIds.filter((id) => !data.items.some((c) => c.id === id)));
+                      }}
+                    />
+                  </th>
                   <th className="p-4">
                     <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("name")}>
                       Name
@@ -222,6 +243,16 @@ export default function CompaniesPage() {
               <tbody>
                 {data?.items.map((c) => (
                   <tr key={c.id} className="border-b hover:bg-muted/50">
+                    <td className="p-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(c.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedIds([...selectedIds, c.id]);
+                          else setSelectedIds(selectedIds.filter((id) => id !== c.id));
+                        }}
+                      />
+                    </td>
                     <td className="p-4 font-medium"><Link href={`/companies/${c.id}`} className="text-primary hover:underline">{c.name}</Link></td>
                     <td className="p-4 text-sm">{c.domain || "-"}</td>
                     <td className="p-4 text-sm">{c.industry || "-"}</td>
@@ -239,7 +270,7 @@ export default function CompaniesPage() {
                   </tr>
                 ))}
                 {data?.items.length === 0 && (
-                  <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No companies found</td></tr>
+                  <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No companies found</td></tr>
                 )}
               </tbody>
             </table>
