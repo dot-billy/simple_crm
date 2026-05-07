@@ -20,6 +20,7 @@ interface Task {
   title: string;
   description: string | null;
   status: string;
+  priority?: string;
   due_date: string | null;
   assigned_to: string | null;
   created_at: string;
@@ -43,7 +44,7 @@ export default function TasksPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ title: "", description: "", due_date: "", recurrence_rule: "none", reminder_minutes_before: "" });
+  const [form, setForm] = useState({ title: "", description: "", due_date: "", recurrence_rule: "none", reminder_minutes_before: "", priority: "medium" });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const load = useCallback(() => {
@@ -59,9 +60,10 @@ export default function TasksPage() {
     if (form.due_date) body.due_date = new Date(form.due_date).toISOString();
     if (form.recurrence_rule && form.recurrence_rule !== "none") body.recurrence_rule = form.recurrence_rule;
     if (form.reminder_minutes_before) body.reminder_minutes_before = parseInt(form.reminder_minutes_before, 10);
+    if (form.priority && form.priority !== "medium") body.priority = form.priority;
     await apiFetch("/api/tasks", { method: "POST", body: JSON.stringify(body) });
     setDialogOpen(false);
-    setForm({ title: "", description: "", due_date: "", recurrence_rule: "none", reminder_minutes_before: "" });
+    setForm({ title: "", description: "", due_date: "", recurrence_rule: "none", reminder_minutes_before: "", priority: "medium" });
     load();
   }
 
@@ -113,6 +115,18 @@ export default function TasksPage() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
+                      <Label>Priority</Label>
+                      <Select value={form.priority} onValueChange={(v) => setForm({ ...form, priority: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="low">Low</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                          <SelectItem value="urgent">Urgent</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
                       <Label>Recurrence</Label>
                       <Select value={form.recurrence_rule} onValueChange={(v) => setForm({ ...form, recurrence_rule: v })}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
@@ -124,16 +138,16 @@ export default function TasksPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Reminder (min before)</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={form.reminder_minutes_before}
-                        onChange={(e) => setForm({ ...form, reminder_minutes_before: e.target.value })}
-                        placeholder="e.g. 60"
-                      />
-                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Reminder (min before)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={form.reminder_minutes_before}
+                      onChange={(e) => setForm({ ...form, reminder_minutes_before: e.target.value })}
+                      placeholder="e.g. 60"
+                    />
                   </div>
                   <Button type="submit" className="w-full">Create Task</Button>
                 </form>
@@ -190,6 +204,15 @@ export default function TasksPage() {
                     <span className="text-xs text-muted-foreground">
                       Due {new Date(task.due_date).toLocaleDateString()}
                     </span>
+                  )}
+                  {task.priority && task.priority !== "medium" && (
+                    <Badge variant="secondary" className={`capitalize ${
+                      task.priority === "urgent" ? "bg-red-100 text-red-800" :
+                      task.priority === "high" ? "bg-orange-100 text-orange-800" :
+                      "bg-gray-100 text-gray-700"
+                    }`}>
+                      {task.priority}
+                    </Badge>
                   )}
                   <Badge variant="secondary" className="capitalize">{config.label}</Badge>
                   <Button variant="ghost" size="icon" onClick={() => handleDelete(task.id)}>

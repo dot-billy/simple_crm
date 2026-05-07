@@ -33,6 +33,7 @@ interface ContactProfile {
     company_id: string | null;
     source: string | null;
     notes: string | null;
+    address: string | null;
     tags: Array<{ id: string; name: string; color: string }>;
     created_at: string;
     updated_at: string;
@@ -255,6 +256,17 @@ export default function ContactProfilePage() {
                   <div className="flex items-center gap-2 text-sm">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                     <span>Added {new Date(contact.created_at).toLocaleDateString()}</span>
+                  </div>
+                  <div className="flex items-start gap-2 text-sm sm:col-span-2">
+                    <span className="text-muted-foreground shrink-0 text-xs uppercase">Address</span>
+                    <InlineEditField
+                      url={`/api/contacts/${contactId}`}
+                      field="address"
+                      value={contact.address}
+                      type="textarea"
+                      placeholder="Add address"
+                      onSaved={load}
+                    />
                   </div>
                 </div>
 

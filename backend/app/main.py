@@ -71,6 +71,12 @@ async def lifespan(app: FastAPI):
         ]:
             await conn.execute(text(f"ALTER TABLE custom_field_definitions {col_def}"))
         await conn.execute(text("ALTER TABLE custom_field_values ADD COLUMN IF NOT EXISTS deal_id UUID REFERENCES deals(id) ON DELETE CASCADE"))
+        # Task priority + Contact address (SCRM-18)
+        try:
+            await conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS priority taskpriority NOT NULL DEFAULT 'MEDIUM'"))
+        except Exception:
+            pass
+        await conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS address TEXT"))
 
     # Seed default admin user if none exists
     async with async_session() as db:

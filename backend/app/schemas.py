@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.models import AccountType, ActivityType, CustomFieldType, DealStage, EmailDirection, EmailTrackingEventType, TaskRecurrence, TaskStatus, UserRole
+from app.models import AccountType, ActivityType, CustomFieldType, DealStage, EmailDirection, EmailTrackingEventType, TaskPriority, TaskRecurrence, TaskStatus, UserRole
 
 
 # --- Auth ---
@@ -115,6 +115,7 @@ class ContactCreate(BaseModel):
     company_id: UUID | None = None
     source: str | None = Field(None, max_length=100)
     notes: str | None = Field(None, max_length=5000)
+    address: str | None = Field(None, max_length=2000)
     tag_ids: list[UUID] = []
 
 
@@ -129,6 +130,7 @@ class ContactRead(BaseModel):
     owner_id: UUID | None = None
     source: str | None = None
     notes: str | None = None
+    address: str | None = None
     tags: list[TagRead] = []
     created_at: datetime
     updated_at: datetime
@@ -145,6 +147,7 @@ class ContactUpdate(BaseModel):
     company_id: UUID | None = None
     source: str | None = Field(None, max_length=100)
     notes: str | None = Field(None, max_length=5000)
+    address: str | None = Field(None, max_length=2000)
     tag_ids: list[UUID] | None = None
 
 
@@ -323,6 +326,7 @@ class TaskCreate(BaseModel):
     reminder_minutes_before: int | None = Field(None, ge=0)
     recurrence_rule: TaskRecurrence = TaskRecurrence.NONE
     parent_task_id: UUID | None = None
+    priority: TaskPriority = TaskPriority.MEDIUM
 
 
 class TaskRead(BaseModel):
@@ -337,6 +341,7 @@ class TaskRead(BaseModel):
     reminder_minutes_before: int | None = None
     recurrence_rule: TaskRecurrence = TaskRecurrence.NONE
     parent_task_id: UUID | None = None
+    priority: TaskPriority = TaskPriority.MEDIUM
     created_at: datetime
     updated_at: datetime
 
@@ -353,6 +358,7 @@ class TaskUpdate(BaseModel):
     deal_id: UUID | None = None
     reminder_minutes_before: int | None = Field(None, ge=0)
     recurrence_rule: TaskRecurrence | None = None
+    priority: TaskPriority | None = None
 
 
 # --- Custom Fields ---

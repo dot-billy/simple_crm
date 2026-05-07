@@ -60,6 +60,13 @@ class TaskRecurrence(str, enum.Enum):
     MONTHLY = "monthly"
 
 
+class TaskPriority(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
 class EmailDirection(str, enum.Enum):
     INBOUND = "inbound"
     OUTBOUND = "outbound"
@@ -170,6 +177,7 @@ class Contact(Base):
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     source = Column(String(100))
     notes = Column(Text)
+    address = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -262,6 +270,7 @@ class Task(Base):
     reminder_minutes_before = Column(Integer, nullable=True)
     recurrence_rule = Column(SAEnum(TaskRecurrence), nullable=False, default=TaskRecurrence.NONE)
     parent_task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    priority = Column(SAEnum(TaskPriority), nullable=False, default=TaskPriority.MEDIUM)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
