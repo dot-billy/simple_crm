@@ -343,9 +343,9 @@ export default function DealsPage() {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <div className="flex gap-4 overflow-x-auto pb-4">
+            <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory md:snap-none">
               {dealsByStage.map((col) => (
-                <div key={col.value} className="min-w-[250px] sm:min-w-[280px] flex-shrink-0">
+                <div key={col.value} className="min-w-[85vw] sm:min-w-[280px] flex-shrink-0 snap-start">
                   <div className="mb-3 flex items-center justify-between">
                     <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${col.color}`}>
                       {col.label}
