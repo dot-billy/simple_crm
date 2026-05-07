@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { apiFetch, apiUpload } from "@/lib/api";
 import { Plus, Trash2, GripVertical, Download, Upload } from "lucide-react";
 import { BulkActionBar } from "@/components/bulk-action-bar";
+import { SavedViewsPicker } from "@/components/saved-views-picker";
 import {
   DndContext,
   DragEndEvent,
@@ -324,6 +325,15 @@ export default function DealsPage() {
             </Dialog>
           </div>
         </div>
+
+        <SavedViewsPicker
+          entity="deal"
+          currentFilters={{ stageFilter, viewMode }}
+          onApply={(f) => {
+            if (typeof f.stageFilter === "string") setStageFilter(f.stageFilter);
+            if (f.viewMode === "table" || f.viewMode === "pipeline") setViewMode(f.viewMode);
+          }}
+        />
 
         {viewMode === "pipeline" ? (
           <DndContext

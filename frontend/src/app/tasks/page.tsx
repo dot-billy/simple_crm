@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { apiFetch } from "@/lib/api";
 import { Plus, Trash2, CheckCircle2, Circle, Clock } from "lucide-react";
 import { BulkActionBar } from "@/components/bulk-action-bar";
+import { SavedViewsPicker } from "@/components/saved-views-picker";
 
 interface Task {
   id: string;
@@ -139,6 +140,15 @@ export default function TasksPage() {
             </Dialog>
           </div>
         </div>
+
+        <SavedViewsPicker
+          entity="task"
+          currentFilters={{ statusFilter }}
+          onApply={(f) => {
+            if (typeof f.statusFilter === "string") setStatusFilter(f.statusFilter);
+            setPage(1);
+          }}
+        />
 
         <BulkActionBar
           entity="tasks"

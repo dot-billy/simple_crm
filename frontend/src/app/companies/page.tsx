@@ -13,6 +13,7 @@ import { apiFetch, apiUpload } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Search, Download, Upload, Trash2, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { BulkActionBar } from "@/components/bulk-action-bar";
+import { SavedViewsPicker } from "@/components/saved-views-picker";
 
 interface Company {
   id: string;
@@ -166,6 +167,19 @@ export default function CompaniesPage() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input placeholder="Search companies..." className="pl-10" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
         </div>
+
+        <SavedViewsPicker
+          entity="company"
+          currentFilters={{ search, sortBy, sortDir, tagFilter, industryFilter }}
+          onApply={(f) => {
+            if (typeof f.search === "string") setSearch(f.search);
+            if (typeof f.sortBy === "string") setSortBy(f.sortBy);
+            if (f.sortDir === "asc" || f.sortDir === "desc") setSortDir(f.sortDir);
+            if (typeof f.tagFilter === "string") setTagFilter(f.tagFilter);
+            if (typeof f.industryFilter === "string") setIndustryFilter(f.industryFilter);
+            setPage(1);
+          }}
+        />
 
         <div className="flex flex-wrap items-center gap-2">
           <Select value={tagFilter || "all"} onValueChange={(v) => { setTagFilter(v === "all" ? "" : v); setPage(1); }}>

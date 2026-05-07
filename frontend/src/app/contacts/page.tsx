@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Search, Download, Upload, Trash2, Clock, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { Timeline } from "@/components/timeline";
 import { BulkActionBar } from "@/components/bulk-action-bar";
+import { SavedViewsPicker } from "@/components/saved-views-picker";
 
 interface Contact {
   id: string;
@@ -181,6 +182,19 @@ export default function ContactsPage() {
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
         </div>
+
+        <SavedViewsPicker
+          entity="contact"
+          currentFilters={{ search, sortBy, sortDir, tagFilter, sourceFilter }}
+          onApply={(f) => {
+            if (typeof f.search === "string") setSearch(f.search);
+            if (typeof f.sortBy === "string") setSortBy(f.sortBy);
+            if (f.sortDir === "asc" || f.sortDir === "desc") setSortDir(f.sortDir);
+            if (typeof f.tagFilter === "string") setTagFilter(f.tagFilter);
+            if (typeof f.sourceFilter === "string") setSourceFilter(f.sourceFilter);
+            setPage(1);
+          }}
+        />
 
         <div className="flex flex-wrap items-center gap-2">
           <Select value={tagFilter || "all"} onValueChange={(v) => { setTagFilter(v === "all" ? "" : v); setPage(1); }}>

@@ -191,6 +191,31 @@ class CompanyUpdate(BaseModel):
 
 # --- Deal ---
 
+class SavedViewCreate(BaseModel):
+    entity_type: str = Field(max_length=50)
+    name: str = Field(max_length=255)
+    filters: dict
+    is_shared: bool = False
+
+
+class SavedViewUpdate(BaseModel):
+    name: str | None = Field(None, max_length=255)
+    filters: dict | None = None
+    is_shared: bool | None = None
+
+
+class SavedViewRead(BaseModel):
+    id: UUID
+    user_id: UUID
+    entity_type: str
+    name: str
+    filters: dict
+    is_shared: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class BulkAction(BaseModel):
     action: str  # delete | add_tag | remove_tag | set_owner | set_stage | set_status
     ids: list[UUID] = Field(min_length=1, max_length=500)

@@ -423,6 +423,23 @@ class AuditLog(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
+# --- Saved Views ---
+
+class SavedView(Base):
+    __tablename__ = "saved_views"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_type = Column(String(50), nullable=False, index=True)  # contact / company / deal / task
+    name = Column(String(255), nullable=False)
+    filters = Column(Text, nullable=False)  # JSON string of filter state
+    is_shared = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User")
+
+
 # --- Notifications ---
 
 class Notification(Base):
