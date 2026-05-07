@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.audit import log_mutation
 from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
-from app.models import Activity, ActivityType, AuditEventType, Company, Contact, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole
+from app.models import Activity, ActivityType, AuditEventType, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole
 from app.routes.notifications import add_notification
 from app.schemas import (
     ActivityRead,
@@ -205,6 +205,7 @@ async def get_deal_profile(
             selectinload(Deal.contact).selectinload(Contact.tags),
             selectinload(Deal.company).selectinload(Company.tags),
             selectinload(Deal.tasks),
+            selectinload(Deal.custom_field_values),
         )
         .where(Deal.id == deal_id)
     )
@@ -241,14 +242,22 @@ async def get_deal_profile(
         last_activity_date=last_act_date,
     )
 
+    defs = (
+        await db.execute(
+            select(CustomFieldDefinition)
+            .where(CustomFieldDefinition.entity_type == "deal")
+            .order_by(CustomFieldDefinition.display_order, CustomFieldDefinition.name)
+        )
+    ).scalars().all()
+
     return DealProfile(
         deal=DealRead.model_validate(deal),
         contact=ContactRead.model_validate(deal.contact) if deal.contact else None,
         company=CompanyRead.model_validate(deal.company) if deal.company else None,
         activities=[ActivityRead.model_validate(a) for a in activities],
         tasks=[TaskRead.model_validate(t) for t in tasks],
-        custom_fields=[],
-        custom_field_definitions=[],
+        custom_fields=[CustomFieldValueRead.model_validate(v) for v in (deal.custom_field_values or [])],
+        custom_field_definitions=[CustomFieldDefinitionRead.model_validate(d) for d in defs],
         stats=stats,
     )
 

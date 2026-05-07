@@ -63,6 +63,14 @@ async def lifespan(app: FastAPI):
                 pass
         # Deal probability
         await conn.execute(text("ALTER TABLE deals ADD COLUMN IF NOT EXISTS probability DOUBLE PRECISION"))
+        # Custom field enhancements
+        for col_def in [
+            "ADD COLUMN IF NOT EXISTS validation_rule TEXT",
+            "ADD COLUMN IF NOT EXISTS default_value TEXT",
+            "ADD COLUMN IF NOT EXISTS display_order INTEGER NOT NULL DEFAULT 0",
+        ]:
+            await conn.execute(text(f"ALTER TABLE custom_field_definitions {col_def}"))
+        await conn.execute(text("ALTER TABLE custom_field_values ADD COLUMN IF NOT EXISTS deal_id UUID REFERENCES deals(id) ON DELETE CASCADE"))
 
     # Seed default admin user if none exists
     async with async_session() as db:

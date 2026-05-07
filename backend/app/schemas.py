@@ -360,9 +360,21 @@ class TaskUpdate(BaseModel):
 class CustomFieldDefinitionCreate(BaseModel):
     name: str = Field(max_length=255)
     field_type: CustomFieldType
-    entity_type: str = Field(max_length=50)  # "contact" or "company"
+    entity_type: str = Field(max_length=50)  # "contact", "company", "deal"
     options: str | None = Field(None, max_length=5000)
     is_required: bool = False
+    validation_rule: str | None = Field(None, max_length=2000)  # JSON: {regex, min, max}
+    default_value: str | None = Field(None, max_length=2000)
+    display_order: int = 0
+
+
+class CustomFieldDefinitionUpdate(BaseModel):
+    name: str | None = Field(None, max_length=255)
+    options: str | None = Field(None, max_length=5000)
+    is_required: bool | None = None
+    validation_rule: str | None = Field(None, max_length=2000)
+    default_value: str | None = Field(None, max_length=2000)
+    display_order: int | None = None
 
 
 class CustomFieldDefinitionRead(BaseModel):
@@ -372,6 +384,9 @@ class CustomFieldDefinitionRead(BaseModel):
     entity_type: str
     options: str | None = None
     is_required: bool
+    validation_rule: str | None = None
+    default_value: str | None = None
+    display_order: int = 0
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -381,6 +396,7 @@ class CustomFieldValueCreate(BaseModel):
     field_id: UUID
     contact_id: UUID | None = None
     company_id: UUID | None = None
+    deal_id: UUID | None = None
     value: str = Field(max_length=10000)
 
 
@@ -389,6 +405,7 @@ class CustomFieldValueRead(BaseModel):
     field_id: UUID
     contact_id: UUID | None = None
     company_id: UUID | None = None
+    deal_id: UUID | None = None
     value: str | None = None
 
     model_config = {"from_attributes": True}

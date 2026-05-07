@@ -227,6 +227,7 @@ class Deal(Base):
     tags = relationship("Tag", secondary=deal_tags, back_populates="deals")
     activities = relationship("Activity", back_populates="deal")
     tasks = relationship("Task", back_populates="deal")
+    custom_field_values = relationship("CustomFieldValue", back_populates="deal")
 
 
 class Activity(Base):
@@ -354,9 +355,12 @@ class CustomFieldDefinition(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False)
     field_type = Column(SAEnum(CustomFieldType), nullable=False)
-    entity_type = Column(String(50), nullable=False)  # "contact" or "company"
-    options = Column(Text)  # JSON string for select options
+    entity_type = Column(String(50), nullable=False)  # "contact", "company", "deal"
+    options = Column(Text)  # JSON array for select options
     is_required = Column(Boolean, default=False)
+    validation_rule = Column(Text, nullable=True)  # JSON: {regex, min, max}
+    default_value = Column(Text, nullable=True)
+    display_order = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -367,11 +371,13 @@ class CustomFieldValue(Base):
     field_id = Column(UUID(as_uuid=True), ForeignKey("custom_field_definitions.id", ondelete="CASCADE"), nullable=False)
     contact_id = Column(UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="CASCADE"), nullable=True)
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=True)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("deals.id", ondelete="CASCADE"), nullable=True)
     value = Column(Text)
 
     field = relationship("CustomFieldDefinition")
     contact = relationship("Contact", back_populates="custom_field_values")
     company = relationship("Company", back_populates="custom_field_values")
+    deal = relationship("Deal", back_populates="custom_field_values")
 
 
 # --- Audit ---
