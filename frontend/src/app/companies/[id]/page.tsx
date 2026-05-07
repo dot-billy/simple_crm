@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Timeline } from "@/components/timeline";
+import { HistoryPanel } from "@/components/history-panel";
 import { ActivityForm } from "@/components/activity-form";
 import { CustomFields } from "@/components/custom-fields";
 import { apiFetch } from "@/lib/api";
@@ -273,6 +274,16 @@ export default function CompanyProfilePage() {
                   <ActivityForm contactId={contacts[0].id} onCreated={handleActivityCreated} />
                 )}
                 <Timeline key={timelineKey} companyId={companyId} />
+              </CardContent>
+            </Card>
+
+            {/* Change History */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Change History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <HistoryPanel entityType="company" entityId={companyId} />
               </CardContent>
             </Card>
           </div>

@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Timeline } from "@/components/timeline";
 import { ActivityForm } from "@/components/activity-form";
 import { CustomFields } from "@/components/custom-fields";
+import { HistoryPanel } from "@/components/history-panel";
 import { apiFetch } from "@/lib/api";
 import {
   ArrowLeft, Mail, Phone, Briefcase, Building2, Tag, Calendar,
@@ -292,6 +293,16 @@ export default function ContactProfilePage() {
               <CardContent className="space-y-4">
                 <ActivityForm contactId={contactId} onCreated={handleActivityCreated} />
                 <Timeline key={timelineKey} contactId={contactId} />
+              </CardContent>
+            </Card>
+
+            {/* Change History */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Change History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <HistoryPanel entityType="contact" entityId={contactId} />
               </CardContent>
             </Card>
           </div>

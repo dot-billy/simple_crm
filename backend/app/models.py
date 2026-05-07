@@ -370,6 +370,21 @@ class AuditEventType(str, enum.Enum):
     API_KEY_REVOKED = "api_key_revoked"
     BULK_IMPORT = "bulk_import"
     AGENT_RESEARCH = "agent_research"
+    CONTACT_CREATED = "contact_created"
+    CONTACT_UPDATED = "contact_updated"
+    CONTACT_DELETED = "contact_deleted"
+    COMPANY_CREATED = "company_created"
+    COMPANY_UPDATED = "company_updated"
+    COMPANY_DELETED = "company_deleted"
+    DEAL_CREATED = "deal_created"
+    DEAL_UPDATED = "deal_updated"
+    DEAL_DELETED = "deal_deleted"
+    DEAL_STAGE_CHANGED = "deal_stage_changed"
+    TASK_CREATED = "task_created"
+    TASK_UPDATED = "task_updated"
+    TASK_DELETED = "task_deleted"
+    ACTIVITY_CREATED = "activity_created"
+    ACTIVITY_DELETED = "activity_deleted"
 
 
 class AuditLog(Base):
@@ -383,6 +398,10 @@ class AuditLog(Base):
     ip_address = Column(String(45), nullable=True)
     detail = Column(Text, nullable=True)
     api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True)
+    entity_type = Column(String(50), nullable=True, index=True)
+    entity_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    before_state = Column(Text, nullable=True)
+    after_state = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 

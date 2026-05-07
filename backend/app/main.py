@@ -16,7 +16,7 @@ from app.database import engine, async_session, Base
 from app.gmail_sync_worker import gmail_sync_loop
 from app.notification_worker import notification_worker_loop
 from app.models import User, UserRole
-from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email, search, notifications, api_keys, service_accounts, agent
+from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email, search, notifications, api_keys, service_accounts, agent, audit
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -28,6 +28,27 @@ async def lifespan(app: FastAPI):
     # Create tables on startup
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Stopgap mini-migrations until Alembic is added.
+        # Idempotent: ADD VALUE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS.
+        from sqlalchemy import text
+        new_enum_values = [
+            "CONTACT_CREATED", "CONTACT_UPDATED", "CONTACT_DELETED",
+            "COMPANY_CREATED", "COMPANY_UPDATED", "COMPANY_DELETED",
+            "DEAL_CREATED", "DEAL_UPDATED", "DEAL_DELETED", "DEAL_STAGE_CHANGED",
+            "TASK_CREATED", "TASK_UPDATED", "TASK_DELETED",
+            "ACTIVITY_CREATED", "ACTIVITY_DELETED",
+        ]
+        for v in new_enum_values:
+            await conn.execute(text(f"ALTER TYPE auditeventtype ADD VALUE IF NOT EXISTS '{v}'"))
+        for col_def in [
+            "ADD COLUMN IF NOT EXISTS entity_type VARCHAR(50)",
+            "ADD COLUMN IF NOT EXISTS entity_id UUID",
+            "ADD COLUMN IF NOT EXISTS before_state TEXT",
+            "ADD COLUMN IF NOT EXISTS after_state TEXT",
+        ]:
+            await conn.execute(text(f"ALTER TABLE audit_log {col_def}"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_log_entity_type ON audit_log(entity_type)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_log_entity_id ON audit_log(entity_id)"))
 
     # Seed default admin user if none exists
     async with async_session() as db:
@@ -108,6 +129,7 @@ app.include_router(notifications.router)
 app.include_router(api_keys.router)
 app.include_router(service_accounts.router)
 app.include_router(agent.router)
+app.include_router(audit.router)
 
 
 @app.get("/api/health")

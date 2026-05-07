@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ActivityForm } from "@/components/activity-form";
+import { HistoryPanel } from "@/components/history-panel";
 import { apiFetch } from "@/lib/api";
 import {
   ArrowLeft, User, Building2, Calendar, Pencil, DollarSign, Clock,
@@ -312,6 +313,16 @@ export default function DealProfilePage() {
                     })}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+
+            {/* Change History */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Change History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <HistoryPanel entityType="deal" entityId={dealId} />
               </CardContent>
             </Card>
           </div>

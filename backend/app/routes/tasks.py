@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import log_mutation
 from app.auth import get_current_user, require_scope
 from app.database import get_db
-from app.models import Task, User, UserRole
+from app.models import AuditEventType, Task, User, UserRole
 from app.routes.notifications import add_notification
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
 
@@ -51,6 +52,7 @@ async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db), curr
         task.assigned_to = current_user.id
     db.add(task)
     await db.flush()
+    log_mutation(db, event_type=AuditEventType.TASK_CREATED, user=current_user, entity_type="task", entity_id=task.id, after=task)
     if task.assigned_to and task.assigned_to != current_user.id:
         add_notification(
             db,
@@ -61,8 +63,8 @@ async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db), curr
             entity_id=task.id,
         )
     await db.commit()
-    await db.refresh(task)
-    return task
+    refreshed = await db.execute(select(Task).where(Task.id == task.id))
+    return refreshed.scalar_one()
 
 
 @router.patch("/{task_id}", response_model=TaskRead)
@@ -74,9 +76,11 @@ async def update_task(task_id: UUID, data: TaskUpdate, db: AsyncSession = Depend
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    before_snapshot = {c.name: getattr(task, c.name) for c in task.__table__.columns}
     old_assigned_to = task.assigned_to
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(task, field, value)
+    log_mutation(db, event_type=AuditEventType.TASK_UPDATED, user=current_user, entity_type="task", entity_id=task.id, before=before_snapshot, after=task)
     if (
         task.assigned_to
         and task.assigned_to != old_assigned_to
@@ -91,8 +95,8 @@ async def update_task(task_id: UUID, data: TaskUpdate, db: AsyncSession = Depend
             entity_id=task.id,
         )
     await db.commit()
-    await db.refresh(task)
-    return task
+    refreshed = await db.execute(select(Task).where(Task.id == task.id))
+    return refreshed.scalar_one()
 
 
 @router.delete("/{task_id}")
@@ -104,6 +108,9 @@ async def delete_task(task_id: UUID, db: AsyncSession = Depends(get_db), current
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    before_snapshot = {c.name: getattr(task, c.name) for c in task.__table__.columns}
+    task_id_copy = task.id
     await db.delete(task)
+    log_mutation(db, event_type=AuditEventType.TASK_DELETED, user=current_user, entity_type="task", entity_id=task_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}

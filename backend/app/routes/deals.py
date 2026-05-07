@@ -8,9 +8,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.audit import log_mutation
 from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
-from app.models import Activity, ActivityType, Company, Contact, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole
+from app.models import Activity, ActivityType, AuditEventType, Company, Contact, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole
 from app.routes.notifications import add_notification
 from app.schemas import (
     ActivityRead,
@@ -81,6 +82,8 @@ async def create_deal(data: DealCreate, db: AsyncSession = Depends(get_db), curr
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         deal.tags = list(tags)
     db.add(deal)
+    await db.flush()
+    log_mutation(db, event_type=AuditEventType.DEAL_CREATED, user=current_user, entity_type="deal", entity_id=deal.id, after=deal)
     await db.commit()
     await db.refresh(deal, ["tags"])
     return deal
@@ -94,12 +97,14 @@ async def update_deal(deal_id: UUID, data: DealUpdate, db: AsyncSession = Depend
     deal = result.scalar_one_or_none()
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
+    before_snapshot = {c.name: getattr(deal, c.name) for c in deal.__table__.columns}
     old_owner_id = deal.owner_id
     for field, value in data.model_dump(exclude_unset=True, exclude={"tag_ids"}).items():
         setattr(deal, field, value)
     if data.tag_ids is not None:
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         deal.tags = list(tags)
+    log_mutation(db, event_type=AuditEventType.DEAL_UPDATED, user=current_user, entity_type="deal", entity_id=deal.id, before=before_snapshot, after=deal)
     if (
         deal.owner_id
         and deal.owner_id != old_owner_id
@@ -126,7 +131,10 @@ async def delete_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current
     deal = result.scalar_one_or_none()
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
+    before_snapshot = {c.name: getattr(deal, c.name) for c in deal.__table__.columns}
+    deal_id_copy = deal.id
     await db.delete(deal)
+    log_mutation(db, event_type=AuditEventType.DEAL_DELETED, user=current_user, entity_type="deal", entity_id=deal_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}
 
@@ -153,6 +161,16 @@ async def update_deal_stage(
         created_by=current_user.id,
     )
     db.add(activity)
+    if old_stage != data.stage:
+        log_mutation(
+            db,
+            event_type=AuditEventType.DEAL_STAGE_CHANGED,
+            user=current_user,
+            entity_type="deal",
+            entity_id=deal.id,
+            before={"stage": old_stage.value},
+            after={"stage": data.stage.value},
+        )
     if deal.owner_id and deal.owner_id != current_user.id and old_stage != data.stage:
         if data.stage == DealStage.CLOSED_WON:
             title = f"Deal won: {deal.title}"

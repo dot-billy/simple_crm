@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import log_mutation
 from app.auth import get_current_user, require_scope
 from app.database import get_db
-from app.models import Activity, Contact, Deal, EmailMessage, Task, User, UserRole
+from app.models import Activity, AuditEventType, Contact, Deal, EmailMessage, Task, User, UserRole
 from app.routes.notifications import add_notification
 from app.schemas import ActivityCreate, ActivityRead, PaginatedTimelineResponse, TimelineItem
 
@@ -47,6 +48,8 @@ async def list_activities(
 async def create_activity(data: ActivityCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("activities:write"))):
     activity = Activity(**data.model_dump(), created_by=current_user.id)
     db.add(activity)
+    await db.flush()
+    log_mutation(db, event_type=AuditEventType.ACTIVITY_CREATED, user=current_user, entity_type="activity", entity_id=activity.id, after=activity)
     if activity.contact_id:
         contact = (await db.execute(select(Contact).where(Contact.id == activity.contact_id))).scalar_one_or_none()
         if contact and contact.owner_id and contact.owner_id != current_user.id:
@@ -59,8 +62,8 @@ async def create_activity(data: ActivityCreate, db: AsyncSession = Depends(get_d
                 entity_id=contact.id,
             )
     await db.commit()
-    await db.refresh(activity)
-    return activity
+    refreshed = await db.execute(select(Activity).where(Activity.id == activity.id))
+    return refreshed.scalar_one()
 
 
 @router.delete("/{activity_id}")
@@ -71,7 +74,10 @@ async def delete_activity(activity_id: UUID, db: AsyncSession = Depends(get_db),
         raise HTTPException(status_code=404, detail="Activity not found")
     if current_user.role == UserRole.USER and activity.created_by != current_user.id:
         raise HTTPException(status_code=403, detail="Not allowed")
+    before_snapshot = {c.name: getattr(activity, c.name) for c in activity.__table__.columns}
+    activity_id_copy = activity.id
     await db.delete(activity)
+    log_mutation(db, event_type=AuditEventType.ACTIVITY_DELETED, user=current_user, entity_type="activity", entity_id=activity_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}
 

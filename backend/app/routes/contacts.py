@@ -8,9 +8,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.audit import log_mutation
 from app.auth import get_current_user, require_scope
 from app.database import get_db
-from app.models import Activity, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole, contact_tags
+from app.models import Activity, AuditEventType, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole, contact_tags
 from app.schemas import ContactCreate, ContactProfile, ContactRead, ContactStats, ContactUpdate, CompanyRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead, TaskRead
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
@@ -118,9 +119,11 @@ async def create_contact(
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         contact.tags = list(tags)
     db.add(contact)
+    await db.flush()
+    log_mutation(db, event_type=AuditEventType.CONTACT_CREATED, user=current_user, entity_type="contact", entity_id=contact.id, after=contact)
     await db.commit()
-    await db.refresh(contact, ["tags"])
-    return contact
+    refreshed = await db.execute(select(Contact).options(selectinload(Contact.tags)).where(Contact.id == contact.id))
+    return refreshed.scalar_one()
 
 
 @router.patch("/{contact_id}", response_model=ContactRead)
@@ -137,6 +140,8 @@ async def update_contact(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
 
+    before_snapshot = {c.name: getattr(contact, c.name) for c in contact.__table__.columns}
+
     update_data = data.model_dump(exclude_unset=True, exclude={"tag_ids"})
     for field, value in update_data.items():
         setattr(contact, field, value)
@@ -145,9 +150,10 @@ async def update_contact(
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         contact.tags = list(tags)
 
+    log_mutation(db, event_type=AuditEventType.CONTACT_UPDATED, user=current_user, entity_type="contact", entity_id=contact.id, before=before_snapshot, after=contact)
     await db.commit()
-    await db.refresh(contact, ["tags"])
-    return contact
+    refreshed = await db.execute(select(Contact).options(selectinload(Contact.tags)).where(Contact.id == contact.id))
+    return refreshed.scalar_one()
 
 
 @router.delete("/{contact_id}")
@@ -162,7 +168,10 @@ async def delete_contact(
     contact = result.scalar_one_or_none()
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
+    before_snapshot = {c.name: getattr(contact, c.name) for c in contact.__table__.columns}
+    contact_id_copy = contact.id
     await db.delete(contact)
+    log_mutation(db, event_type=AuditEventType.CONTACT_DELETED, user=current_user, entity_type="contact", entity_id=contact_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}
 

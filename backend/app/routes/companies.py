@@ -7,9 +7,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.audit import log_mutation
 from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
-from app.models import Activity, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, User, UserRole, company_tags
+from app.models import Activity, AuditEventType, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, User, UserRole, company_tags
 from app.schemas import CompanyCreate, CompanyProfile, CompanyRead, CompanyStats, CompanyUpdate, ContactRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead
 
 router = APIRouter(prefix="/api/companies", tags=["companies"])
@@ -95,9 +96,11 @@ async def create_company(data: CompanyCreate, db: AsyncSession = Depends(get_db)
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         company.tags = list(tags)
     db.add(company)
+    await db.flush()
+    log_mutation(db, event_type=AuditEventType.COMPANY_CREATED, user=current_user, entity_type="company", entity_id=company.id, after=company)
     await db.commit()
-    await db.refresh(company, ["tags"])
-    return company
+    refreshed = await db.execute(select(Company).options(selectinload(Company.tags)).where(Company.id == company.id))
+    return refreshed.scalar_one()
 
 
 @router.patch("/{company_id}", response_model=CompanyRead)
@@ -108,14 +111,16 @@ async def update_company(company_id: UUID, data: CompanyUpdate, db: AsyncSession
     company = result.scalar_one_or_none()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
+    before_snapshot = {c.name: getattr(company, c.name) for c in company.__table__.columns}
     for field, value in data.model_dump(exclude_unset=True, exclude={"tag_ids"}).items():
         setattr(company, field, value)
     if data.tag_ids is not None:
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         company.tags = list(tags)
+    log_mutation(db, event_type=AuditEventType.COMPANY_UPDATED, user=current_user, entity_type="company", entity_id=company.id, before=before_snapshot, after=company)
     await db.commit()
-    await db.refresh(company, ["tags"])
-    return company
+    refreshed = await db.execute(select(Company).options(selectinload(Company.tags)).where(Company.id == company.id))
+    return refreshed.scalar_one()
 
 
 @router.delete("/{company_id}")
@@ -126,7 +131,10 @@ async def delete_company(company_id: UUID, db: AsyncSession = Depends(get_db), c
     company = result.scalar_one_or_none()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
+    before_snapshot = {c.name: getattr(company, c.name) for c in company.__table__.columns}
+    company_id_copy = company.id
     await db.delete(company)
+    log_mutation(db, event_type=AuditEventType.COMPANY_DELETED, user=current_user, entity_type="company", entity_id=company_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}
 
