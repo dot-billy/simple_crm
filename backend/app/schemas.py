@@ -712,3 +712,24 @@ class CompanyProfile(BaseModel):
     custom_field_definitions: list[CustomFieldDefinitionRead] = []
     stats: CompanyStats
     model_config = {"from_attributes": True}
+
+
+class DealStats(BaseModel):
+    total_activities: int = 0
+    total_tasks: int = 0
+    open_tasks: int = 0
+    days_in_stage: int = 0
+    days_open: int = 0
+    last_activity_date: datetime | None = None
+
+
+class DealProfile(BaseModel):
+    deal: DealRead
+    contact: ContactRead | None = None
+    company: CompanyRead | None = None
+    activities: list[ActivityRead] = []
+    tasks: list[TaskRead] = []
+    custom_fields: list[CustomFieldValueRead] = []
+    custom_field_definitions: list[CustomFieldDefinitionRead] = []
+    stats: DealStats
+    model_config = {"from_attributes": True}

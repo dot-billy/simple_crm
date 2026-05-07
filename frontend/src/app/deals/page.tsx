@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -117,7 +118,7 @@ function SortableDealCard({
               <GripVertical className="h-4 w-4" />
             </button>
             <div>
-              <p className="font-medium text-sm">{deal.title}</p>
+              <Link href={`/deals/${deal.id}`} className="font-medium text-sm hover:underline">{deal.title}</Link>
               <p className="text-lg font-bold text-primary">
                 ${deal.value.toLocaleString()}
               </p>
@@ -392,7 +393,9 @@ export default function DealsPage() {
                     const stageInfo = stages.find((s) => s.value === d.stage);
                     return (
                       <tr key={d.id} className="border-b hover:bg-muted/50">
-                        <td className="p-4 font-medium">{d.title}</td>
+                        <td className="p-4 font-medium">
+                          <Link href={`/deals/${d.id}`} className="text-primary hover:underline">{d.title}</Link>
+                        </td>
                         <td className="p-4">${d.value.toLocaleString()}</td>
                         <td className="p-4">
                           <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${stageInfo?.color || ""}`}>
