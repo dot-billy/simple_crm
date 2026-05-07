@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user, require_role
+from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
 from app.models import Company, Contact, CustomFieldDefinition, CustomFieldValue, User, UserRole
 from app.schemas import (
@@ -35,7 +35,7 @@ async def _check_entity_ownership(db: AsyncSession, user: User, contact_id: UUID
 async def list_definitions(
     entity_type: str = Query(""),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("custom_fields:read")),
 ):
     query = select(CustomFieldDefinition)
     if entity_type:
@@ -77,7 +77,7 @@ async def list_values(
     contact_id: UUID | None = Query(None),
     company_id: UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("custom_fields:read")),
 ):
     await _check_entity_ownership(db, current_user, contact_id, company_id)
     query = select(CustomFieldValue)
@@ -93,7 +93,7 @@ async def list_values(
 async def set_value(
     data: CustomFieldValueCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("custom_fields:write")),
 ):
     await _check_entity_ownership(db, current_user, data.contact_id, data.company_id)
     # Upsert

@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user, require_role
+from app.auth import require_scope
 from app.config import settings
 from app.database import get_db
 from app.gmail_service import send_email, sync_user_gmail, verify_tracking_signature
@@ -86,7 +86,7 @@ def _substitute_variables(
 
 @router.get("/template-variables")
 async def get_template_variables(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     return TEMPLATE_VARIABLES
 
@@ -96,7 +96,7 @@ async def get_template_variables(
 @router.get("/sync/status", response_model=GmailSyncStatus)
 async def get_sync_status(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     is_configured = bool(settings.GOOGLE_SERVICE_ACCOUNT_FILE)
     result = await db.execute(
@@ -114,7 +114,7 @@ async def get_sync_status(
 @router.post("/sync/trigger")
 async def trigger_sync(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     if not settings.GOOGLE_SERVICE_ACCOUNT_FILE:
         raise HTTPException(status_code=400, detail="Gmail integration not configured")
@@ -133,7 +133,7 @@ async def list_emails(
     direction: str = Query(""),
     search: str = Query(""),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     query = select(EmailMessage)
     if current_user.role == UserRole.USER:
@@ -172,7 +172,7 @@ async def list_emails(
 async def get_email(
     email_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     query = select(EmailMessage).where(EmailMessage.id == email_id)
     if current_user.role == UserRole.USER:
@@ -188,7 +188,7 @@ async def get_email(
 async def send(
     data: EmailSendRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     if not settings.GOOGLE_SERVICE_ACCOUNT_FILE:
         raise HTTPException(status_code=400, detail="Gmail integration not configured")
@@ -239,7 +239,7 @@ async def link_email_to_entity(
     contact_id: UUID | None = None,
     deal_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     query = select(EmailMessage).where(EmailMessage.id == email_id)
     if current_user.role == UserRole.USER:
@@ -338,7 +338,7 @@ async def track_click(
 async def get_tracking_events(
     email_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     result = await db.execute(
         select(EmailTrackingEvent)
@@ -351,7 +351,7 @@ async def get_tracking_events(
 @router.get("/tracking/stats", response_model=EmailTrackingStats)
 async def get_tracking_stats(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     # Count outbound emails with tracking
     sent_q = select(func.count()).select_from(EmailMessage).where(
@@ -386,7 +386,7 @@ async def get_tracking_stats(
 @router.get("/templates", response_model=list[EmailTemplateRead])
 async def list_templates(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     query = select(EmailTemplate)
     if current_user.role == UserRole.USER:
@@ -401,7 +401,7 @@ async def list_templates(
 async def create_template(
     data: EmailTemplateCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     template = EmailTemplate(**data.model_dump(), created_by=current_user.id)
     db.add(template)
@@ -415,7 +415,7 @@ async def update_template(
     template_id: UUID,
     data: EmailTemplateUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     result = await db.execute(select(EmailTemplate).where(EmailTemplate.id == template_id))
     template = result.scalar_one_or_none()
@@ -434,7 +434,7 @@ async def update_template(
 async def delete_template(
     template_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     result = await db.execute(select(EmailTemplate).where(EmailTemplate.id == template_id))
     template = result.scalar_one_or_none()

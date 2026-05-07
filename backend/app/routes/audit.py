@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import require_role
+from app.auth import require_scope
 from app.database import get_db
-from app.models import AuditLog, User, UserRole
+from app.models import AuditLog, User
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
@@ -18,7 +18,7 @@ async def list_audit(
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER, UserRole.USER)),
+    current_user: User = Depends(require_scope("audit:read")),
 ):
     query = select(AuditLog)
     if entity_type:

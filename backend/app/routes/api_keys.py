@@ -1,3 +1,4 @@
+import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -6,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user, hash_password
+from app.auth import hash_password, require_user_session
 from app.database import get_db
 from app.models import APIKey, User
 from app.routes.notifications import add_notification
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/api-keys", tags=["api_keys"])
 @router.get("", response_model=list[APIKeyRead])
 async def list_api_keys(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_user_session),
 ):
     result = await db.execute(
         select(APIKey)
@@ -33,7 +34,7 @@ async def list_api_keys(
 async def create_api_key(
     data: APIKeyCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_user_session),
 ):
     raw_key = secrets.token_urlsafe(32)
     prefix = raw_key[:8]
@@ -43,12 +44,15 @@ async def create_api_key(
     if data.expires_in_days is not None:
         expires_at = datetime.now(timezone.utc) + timedelta(days=data.expires_in_days)
 
+    # Default self-managed keys to full access (*) when caller omits scopes.
+    scopes_json = json.dumps(data.scopes if data.scopes is not None else ["*"])
     api_key = APIKey(
         user_id=current_user.id,
         name=data.name,
         key_prefix=prefix,
         key_hash=key_hash,
         expires_at=expires_at,
+        scopes=scopes_json,
     )
     db.add(api_key)
     await db.flush()
@@ -77,7 +81,7 @@ async def create_api_key(
 async def deactivate_api_key(
     key_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_user_session),
 ):
     result = await db.execute(
         select(APIKey).where(

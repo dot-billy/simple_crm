@@ -1,3 +1,5 @@
+import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -14,6 +16,28 @@ from app.models import AccountType, APIKey, User, UserRole
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
+
+# In-memory sliding-window rate limit per API key id.
+# Maps api_key_id (str) -> deque of timestamps (seconds, monotonic).
+# Single-process only; if we ever scale horizontally swap for Redis.
+_api_key_request_log: dict[str, deque[float]] = {}
+
+
+def _check_api_key_rate_limit(api_key: APIKey) -> None:
+    if not api_key.rate_limit_per_minute:
+        return
+    key = str(api_key.id)
+    now = time.monotonic()
+    window_start = now - 60.0
+    log = _api_key_request_log.setdefault(key, deque())
+    while log and log[0] < window_start:
+        log.popleft()
+    if len(log) >= api_key.rate_limit_per_minute:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"API key rate limit exceeded ({api_key.rate_limit_per_minute}/min)",
+        )
+    log.append(now)
 
 
 def hash_password(password: str) -> str:
@@ -59,6 +83,8 @@ async def get_current_user(
                 # Check expiry
                 if candidate.expires_at and candidate.expires_at < datetime.now(timezone.utc):
                     raise credentials_exception
+                # Enforce per-key rate limit before recording usage.
+                _check_api_key_rate_limit(candidate)
                 # Update last_used_at
                 candidate.last_used_at = datetime.now(timezone.utc)
                 await db.commit()
@@ -95,24 +121,46 @@ async def get_current_user(
 
 
 def require_role(*roles: UserRole):
-    async def checker(current_user: User = Depends(get_current_user)) -> User:
+    """Block API keys outright -- role-gated routes are interactive only."""
+    async def checker(request: Request, current_user: User = Depends(get_current_user)) -> User:
+        if getattr(request.state, "api_key", None) is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API keys cannot access role-gated endpoints",
+            )
         if current_user.role not in roles:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         return current_user
     return checker
 
 
+async def require_user_session(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """For endpoints that must never be reachable via API key (e.g. API-key management itself)."""
+    if getattr(request.state, "api_key", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API keys cannot access this endpoint; sign in interactively.",
+        )
+    return current_user
+
+
 def require_scope(*scopes: str):
-    """Dependency that checks API key scopes. Passes through for JWT/cookie auth."""
+    """Check API key scopes. JWT/cookie auth passes through with full access."""
     async def checker(request: Request, current_user: User = Depends(get_current_user)) -> User:
         import json
         api_key = getattr(request.state, "api_key", None)
         if api_key is None:
-            # JWT/cookie auth — full access
+            # JWT/cookie auth -- full access
             return current_user
-        if api_key.scopes is None:
-            # Legacy key with no scopes — full access (backward compat)
-            return current_user
+        # API keys must have explicit scopes. NULL or empty == zero access.
+        if not api_key.scopes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API key has no scopes assigned",
+            )
         key_scopes = json.loads(api_key.scopes)
         if "*" in key_scopes:
             return current_user
