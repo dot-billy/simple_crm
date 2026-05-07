@@ -11,7 +11,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { apiFetch, apiUpload } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Download, Upload, Trash2, Clock, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
+import { Plus, Search, Download, Upload, Trash2, Clock, ArrowUpDown, ChevronUp, ChevronDown, Users } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { Timeline } from "@/components/timeline";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { SavedViewsPicker } from "@/components/saved-views-picker";
@@ -345,7 +346,13 @@ export default function ContactsPage() {
                   </tr>
                 ))}
                 {data?.items.length === 0 && (
-                  <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No contacts found</td></tr>
+                  <tr><td colSpan={7 + cf.visible.length} className="p-0">
+                    <EmptyState
+                      icon={Users}
+                      title={search || tagFilter || sourceFilter ? "No contacts match your filters" : "No contacts yet"}
+                      description={search || tagFilter || sourceFilter ? "Try clearing filters or adjusting your search." : "Click Add Contact to get started."}
+                    />
+                  </td></tr>
                 )}
               </tbody>
             </table>

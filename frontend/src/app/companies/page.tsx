@@ -11,7 +11,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { apiFetch, apiUpload } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Download, Upload, Trash2, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
+import { Plus, Search, Download, Upload, Trash2, ArrowUpDown, ChevronUp, ChevronDown, Building2 } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { SavedViewsPicker } from "@/components/saved-views-picker";
 import { ColumnPicker, useCustomFieldColumns } from "@/components/custom-field-columns";
@@ -321,7 +322,13 @@ export default function CompaniesPage() {
                   </tr>
                 ))}
                 {data?.items.length === 0 && (
-                  <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No companies found</td></tr>
+                  <tr><td colSpan={7 + cf.visible.length} className="p-0">
+                    <EmptyState
+                      icon={Building2}
+                      title={search || tagFilter || industryFilter ? "No companies match your filters" : "No companies yet"}
+                      description={search || tagFilter || industryFilter ? "Try clearing filters or adjusting your search." : "Click Add Company to get started."}
+                    />
+                  </td></tr>
                 )}
               </tbody>
             </table>

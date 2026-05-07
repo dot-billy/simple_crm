@@ -10,7 +10,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch } from "@/lib/api";
-import { Plus, Trash2, CheckCircle2, Circle, Clock } from "lucide-react";
+import { Plus, Trash2, CheckCircle2, Circle, Clock, CheckSquare } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { SavedViewsPicker } from "@/components/saved-views-picker";
 
@@ -200,7 +201,13 @@ export default function TasksPage() {
           })}
           {data?.items.length === 0 && (
             <Card>
-              <CardContent className="p-8 text-center text-muted-foreground">No tasks found</CardContent>
+              <CardContent className="p-0">
+                <EmptyState
+                  icon={CheckSquare}
+                  title={statusFilter ? "No tasks with this status" : "No tasks yet"}
+                  description={statusFilter ? "Try a different status filter." : "Click Add Task to create one."}
+                />
+              </CardContent>
             </Card>
           )}
         </div>

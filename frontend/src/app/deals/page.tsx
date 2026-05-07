@@ -11,7 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch, apiUpload } from "@/lib/api";
-import { Plus, Trash2, GripVertical, Download, Upload } from "lucide-react";
+import { Plus, Trash2, GripVertical, Download, Upload, Handshake } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { SavedViewsPicker } from "@/components/saved-views-picker";
 import {
@@ -451,7 +452,13 @@ export default function DealsPage() {
                     );
                   })}
                   {data?.items.length === 0 && (
-                    <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No deals found</td></tr>
+                    <tr><td colSpan={6} className="p-0">
+                      <EmptyState
+                        icon={Handshake}
+                        title={stageFilter ? "No deals in this stage" : "No deals yet"}
+                        description={stageFilter ? "Try a different stage filter." : "Click Add Deal to start tracking opportunities."}
+                      />
+                    </td></tr>
                   )}
                 </tbody>
               </table>
