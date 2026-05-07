@@ -1,14 +1,17 @@
+import csv
+import io
+from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
-from app.models import Deal, Tag, User, UserRole
-from app.schemas import DealCreate, DealRead, DealUpdate
+from app.models import Activity, ActivityType, Deal, DealStage, Tag, User, UserRole
+from app.schemas import DealCreate, DealRead, DealStageUpdate, DealUpdate
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
 
@@ -26,7 +29,7 @@ async def list_deals(
     search: str = Query(""),
     stage: str = Query(""),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("deals:read")),
 ):
     query = select(Deal).options(selectinload(Deal.tags))
     query = _apply_ownership_filter(query, current_user)
@@ -47,7 +50,7 @@ async def list_deals(
 
 
 @router.get("/{deal_id}", response_model=DealRead)
-async def get_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def get_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("deals:read"))):
     query = select(Deal).options(selectinload(Deal.tags)).where(Deal.id == deal_id)
     query = _apply_ownership_filter(query, current_user)
     result = await db.execute(query)
@@ -58,7 +61,7 @@ async def get_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current_us
 
 
 @router.post("", response_model=DealRead)
-async def create_deal(data: DealCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def create_deal(data: DealCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("deals:write"))):
     deal = Deal(**data.model_dump(exclude={"tag_ids"}), owner_id=current_user.id)
     if data.tag_ids:
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
@@ -70,7 +73,7 @@ async def create_deal(data: DealCreate, db: AsyncSession = Depends(get_db), curr
 
 
 @router.patch("/{deal_id}", response_model=DealRead)
-async def update_deal(deal_id: UUID, data: DealUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def update_deal(deal_id: UUID, data: DealUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("deals:write"))):
     query = select(Deal).options(selectinload(Deal.tags)).where(Deal.id == deal_id)
     query = _apply_ownership_filter(query, current_user)
     result = await db.execute(query)
@@ -88,7 +91,7 @@ async def update_deal(deal_id: UUID, data: DealUpdate, db: AsyncSession = Depend
 
 
 @router.delete("/{deal_id}")
-async def delete_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("deals:write"))):
     query = select(Deal).where(Deal.id == deal_id)
     query = _apply_ownership_filter(query, current_user)
     result = await db.execute(query)
@@ -98,3 +101,89 @@ async def delete_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current
     await db.delete(deal)
     await db.commit()
     return {"ok": True}
+
+
+@router.patch("/{deal_id}/stage", response_model=DealRead)
+async def update_deal_stage(
+    deal_id: UUID,
+    data: DealStageUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("deals:write")),
+):
+    query = select(Deal).options(selectinload(Deal.tags)).where(Deal.id == deal_id)
+    query = _apply_ownership_filter(query, current_user)
+    result = await db.execute(query)
+    deal = result.scalar_one_or_none()
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    deal.stage = data.stage
+    activity = Activity(
+        type=ActivityType.NOTE,
+        subject=f"Deal moved to {data.stage.value}",
+        deal_id=deal.id,
+        created_by=current_user.id,
+    )
+    db.add(activity)
+    await db.commit()
+    await db.refresh(deal, ["tags"])
+    return deal
+
+
+def _sanitize_csv_value(val: str | None) -> str | None:
+    if not val:
+        return val
+    return val.lstrip("=+-@")
+
+
+@router.post("/import/csv")
+async def import_deals_csv(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
+):
+    MAX_SIZE = 5 * 1024 * 1024  # 5MB
+    MAX_ROWS = 10000
+    raw = await file.read(MAX_SIZE + 1)
+    if len(raw) > MAX_SIZE:
+        raise HTTPException(status_code=413, detail="File too large (max 5MB)")
+    content = raw.decode("utf-8")
+    reader = csv.DictReader(io.StringIO(content))
+    imported = 0
+    skipped = 0
+    valid_stages = {s.value for s in DealStage}
+    for row in reader:
+        if imported + skipped >= MAX_ROWS:
+            break
+        stage_str = _sanitize_csv_value(row.get("stage", "")) or ""
+        if stage_str not in valid_stages:
+            skipped += 1
+            continue
+        title = _sanitize_csv_value(row.get("title", "")) or ""
+        if not title:
+            skipped += 1
+            continue
+        value_str = _sanitize_csv_value(row.get("value", "")) or "0"
+        try:
+            value = float(value_str)
+        except ValueError:
+            value = 0
+        expected_close_date = None
+        date_str = _sanitize_csv_value(row.get("expected_close_date", "")) or ""
+        if date_str:
+            try:
+                expected_close_date = datetime.fromisoformat(date_str)
+            except ValueError:
+                pass
+        deal = Deal(
+            title=title,
+            value=value,
+            currency=_sanitize_csv_value(row.get("currency", "")) or "USD",
+            stage=DealStage(stage_str),
+            expected_close_date=expected_close_date,
+            notes=_sanitize_csv_value(row.get("notes")),
+            owner_id=current_user.id,
+        )
+        db.add(deal)
+        imported += 1
+    await db.commit()
+    return {"imported": imported, "skipped": skipped}

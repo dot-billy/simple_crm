@@ -72,6 +72,31 @@ class CustomFieldType(str, enum.Enum):
     SELECT = "select"
 
 
+class AccountType(str, enum.Enum):
+    HUMAN = "human"
+    SERVICE = "service"
+
+
+class APIKeyScope(str, enum.Enum):
+    CONTACTS_READ = "contacts:read"
+    CONTACTS_WRITE = "contacts:write"
+    COMPANIES_READ = "companies:read"
+    COMPANIES_WRITE = "companies:write"
+    DEALS_READ = "deals:read"
+    DEALS_WRITE = "deals:write"
+    ACTIVITIES_READ = "activities:read"
+    ACTIVITIES_WRITE = "activities:write"
+    TASKS_READ = "tasks:read"
+    TASKS_WRITE = "tasks:write"
+    TAGS_READ = "tags:read"
+    TAGS_WRITE = "tags:write"
+    SEARCH_READ = "search:read"
+    DASHBOARD_READ = "dashboard:read"
+    AGENT_BULK_UPLOAD = "agent:bulk_upload"
+    AGENT_RESEARCH = "agent:research"
+    ALL = "*"
+
+
 # --- Association tables ---
 
 contact_tags = Table(
@@ -106,6 +131,8 @@ class User(Base):
     full_name = Column(String(255), nullable=False)
     hashed_password = Column(String(255), nullable=False)
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.USER)
+    account_type = Column(SAEnum(AccountType), nullable=False, default=AccountType.HUMAN)
+    description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -337,6 +364,12 @@ class AuditEventType(str, enum.Enum):
     USER_CREATED = "user_created"
     USER_UPDATED = "user_updated"
     PASSWORD_CHANGED = "password_changed"
+    SERVICE_ACCOUNT_CREATED = "service_account_created"
+    SERVICE_ACCOUNT_UPDATED = "service_account_updated"
+    API_KEY_CREATED = "api_key_created"
+    API_KEY_REVOKED = "api_key_revoked"
+    BULK_IMPORT = "bulk_import"
+    AGENT_RESEARCH = "agent_research"
 
 
 class AuditLog(Base):
@@ -349,4 +382,42 @@ class AuditLog(Base):
     email = Column(String(255), nullable=True)
     ip_address = Column(String(45), nullable=True)
     detail = Column(Text, nullable=True)
+    api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# --- Notifications ---
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=True)
+    entity_type = Column(String(50), nullable=True)  # "deal", "task", "contact"
+    entity_id = Column(UUID(as_uuid=True), nullable=True)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    user = relationship("User")
+
+
+# --- API Keys ---
+
+class APIKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    key_prefix = Column(String(8), nullable=False, index=True)
+    key_hash = Column(String(255), nullable=False)
+    scopes = Column(Text, nullable=True)  # JSON array of scope strings; NULL = full access
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    rate_limit_per_minute = Column(Integer, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User")

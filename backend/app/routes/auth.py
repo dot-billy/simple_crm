@@ -13,7 +13,7 @@ from sqlalchemy.sql import func
 from app.auth import create_access_token, get_current_user, hash_password, require_role, verify_password
 from app.config import settings
 from app.database import get_db
-from app.models import AuditEventType, AuditLog, User, UserRole
+from app.models import AccountType, AuditEventType, AuditLog, User, UserRole
 from app.schemas import (
     AuditLogRead,
     PaginatedAuditLogResponse,
@@ -66,6 +66,8 @@ async def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), d
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
+    if user.account_type == AccountType.SERVICE:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Service accounts cannot log in via password")
     token = create_access_token(user.id, user.role.value)
     audit_logger.info("LOGIN_SUCCESS user_id=%s email=%s ip=%s", user.id, user.email, ip)
     await _write_audit(db, AuditEventType.LOGIN_SUCCESS, ip_address=ip, user_id=user.id, email=user.email)
@@ -146,7 +148,9 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN)),
 ):
-    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    result = await db.execute(
+        select(User).where(User.account_type == AccountType.HUMAN).order_by(User.created_at.desc())
+    )
     return result.scalars().all()
 
 

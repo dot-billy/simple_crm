@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.models import ActivityType, CustomFieldType, DealStage, EmailDirection, EmailTrackingEventType, TaskStatus, UserRole
+from app.models import AccountType, ActivityType, CustomFieldType, DealStage, EmailDirection, EmailTrackingEventType, TaskStatus, UserRole
 
 
 # --- Auth ---
@@ -233,6 +233,10 @@ class DealUpdate(BaseModel):
     tag_ids: list[UUID] | None = None
 
 
+class DealStageUpdate(BaseModel):
+    stage: DealStage
+
+
 # --- Activity ---
 
 class ActivityCreate(BaseModel):
@@ -336,6 +340,18 @@ class CustomFieldValueRead(BaseModel):
 
 # --- Dashboard ---
 
+class WeeklyDealCount(BaseModel):
+    week: str
+    count: int
+
+
+class DashboardCharts(BaseModel):
+    deals_over_time: list[WeeklyDealCount]
+    revenue_by_stage: dict[str, float]
+    contacts_by_source: dict[str, int]
+    task_completion: dict[str, int]
+
+
 class DashboardStats(BaseModel):
     total_contacts: int
     total_companies: int
@@ -344,6 +360,7 @@ class DashboardStats(BaseModel):
     deals_by_stage: dict[str, int]
     recent_activities: list[ActivityRead]
     upcoming_tasks: list[TaskRead]
+    charts: DashboardCharts
 
 
 # --- Email / Gmail ---
@@ -431,6 +448,34 @@ class GmailSyncStatus(BaseModel):
     history_id: str | None = None
 
 
+# --- Search ---
+
+class SearchResults(BaseModel):
+    contacts: list[ContactRead] = []
+    companies: list[CompanyRead] = []
+    deals: list[DealRead] = []
+    tasks: list[TaskRead] = []
+
+
+# --- Timeline ---
+
+class TimelineItem(BaseModel):
+    id: UUID
+    type: str  # "activity", "email", "task"
+    title: str
+    description: str | None = None
+    date: datetime
+    metadata: dict = {}
+
+
+class PaginatedTimelineResponse(BaseModel):
+    items: list[TimelineItem]
+    total: int
+    page: int
+    per_page: int
+    pages: int
+
+
 # --- Pagination ---
 
 class PaginatedResponse(BaseModel):
@@ -439,3 +484,230 @@ class PaginatedResponse(BaseModel):
     page: int
     per_page: int
     pages: int
+
+
+# --- Notifications ---
+
+class NotificationRead(BaseModel):
+    id: UUID
+    user_id: UUID
+    title: str
+    message: str | None = None
+    entity_type: str | None = None
+    entity_id: UUID | None = None
+    is_read: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class PaginatedNotificationResponse(BaseModel):
+    items: list[NotificationRead]
+    total: int
+    page: int
+    per_page: int
+    pages: int
+    unread_count: int
+
+
+# --- API Keys ---
+
+class APIKeyCreate(BaseModel):
+    name: str = Field(max_length=255)
+    expires_in_days: int | None = Field(default=None, ge=1, le=365)
+    scopes: list[str] | None = None
+
+
+class APIKeyRead(BaseModel):
+    id: UUID
+    name: str
+    key_prefix: str
+    scopes: list[str] | None = None
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None
+    rate_limit_per_minute: int | None = None
+    is_active: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+    @field_validator("scopes", mode="before")
+    @classmethod
+    def parse_scopes_json(cls, v):
+        if isinstance(v, str):
+            import json
+            return json.loads(v)
+        return v
+
+
+class APIKeyCreated(BaseModel):
+    id: UUID
+    name: str
+    key: str  # full key, shown only once
+    key_prefix: str
+    scopes: list[str] | None = None
+    expires_at: datetime | None = None
+    created_at: datetime
+
+
+# --- Service Accounts ---
+
+class ServiceAccountCreate(BaseModel):
+    name: str = Field(max_length=255)
+    description: str | None = Field(None, max_length=1000)
+
+
+class ServiceAccountRead(BaseModel):
+    id: UUID
+    full_name: str
+    email: str
+    description: str | None = None
+    account_type: AccountType
+    is_active: bool
+    created_at: datetime
+    key_count: int = 0
+    model_config = {"from_attributes": True}
+
+
+class ServiceAccountUpdate(BaseModel):
+    name: str | None = Field(None, max_length=255)
+    description: str | None = Field(None, max_length=1000)
+    is_active: bool | None = None
+
+
+class ScopedAPIKeyCreate(BaseModel):
+    name: str = Field(max_length=255)
+    scopes: list[str]
+    expires_in_days: int | None = Field(default=None, ge=1, le=365)
+    rate_limit_per_minute: int | None = Field(default=None, ge=1, le=1000)
+
+
+# --- Bulk Operations ---
+
+class BulkContactItem(BaseModel):
+    first_name: str = Field(max_length=255)
+    last_name: str = Field(max_length=255)
+    email: EmailStr | None = None
+    phone: str | None = Field(None, max_length=50)
+    job_title: str | None = Field(None, max_length=255)
+    company_name: str | None = None
+    source: str | None = Field(None, max_length=100)
+    notes: str | None = Field(None, max_length=5000)
+
+
+class BulkContactUpload(BaseModel):
+    contacts: list[BulkContactItem] = Field(max_length=500)
+    dedupe_on_email: bool = True
+    default_source: str | None = "agent_import"
+
+
+class BulkCompanyItem(BaseModel):
+    name: str = Field(max_length=255)
+    domain: str | None = Field(None, max_length=255)
+    industry: str | None = Field(None, max_length=255)
+    size: str | None = Field(None, max_length=50)
+    address: str | None = Field(None, max_length=1000)
+    phone: str | None = Field(None, max_length=50)
+    notes: str | None = Field(None, max_length=5000)
+
+
+class BulkCompanyUpload(BaseModel):
+    companies: list[BulkCompanyItem] = Field(max_length=500)
+    dedupe_on_domain: bool = True
+
+
+class BulkDealItem(BaseModel):
+    title: str = Field(max_length=255)
+    value: float = 0
+    currency: str = Field(default="USD", max_length=10)
+    stage: DealStage = DealStage.LEAD
+    contact_email: str | None = None
+    company_name: str | None = None
+    expected_close_date: datetime | None = None
+    notes: str | None = Field(None, max_length=5000)
+
+
+class BulkDealUpload(BaseModel):
+    deals: list[BulkDealItem] = Field(max_length=500)
+
+
+class BulkResultItem(BaseModel):
+    index: int
+    status: str  # "created", "skipped_duplicate", "error"
+    id: UUID | None = None
+    error: str | None = None
+
+
+class BulkUploadResult(BaseModel):
+    total: int
+    created: int
+    skipped: int
+    errors: int
+    results: list[BulkResultItem]
+
+
+# --- Agent Research ---
+
+class CompanyResearchResult(BaseModel):
+    company: CompanyRead | None = None
+    contacts: list[ContactRead] = []
+    deals: list[DealRead] = []
+    recent_activities: list[ActivityRead] = []
+
+
+class ContactResearchResult(BaseModel):
+    contact: ContactRead | None = None
+    company: CompanyRead | None = None
+    deals: list[DealRead] = []
+    recent_activities: list[ActivityRead] = []
+
+
+class AgentWhoAmI(BaseModel):
+    service_account_id: UUID
+    name: str
+    email: str
+    account_type: str
+    scopes: list[str] | None = None
+    rate_limit_per_minute: int | None = None
+
+
+# --- Profile / Dossier ---
+
+class ContactStats(BaseModel):
+    total_deals: int = 0
+    total_deal_value: float = 0.0
+    open_deals: int = 0
+    won_deals: int = 0
+    total_activities: int = 0
+    total_tasks: int = 0
+    open_tasks: int = 0
+    last_activity_date: datetime | None = None
+
+
+class ContactProfile(BaseModel):
+    contact: ContactRead
+    company: CompanyRead | None = None
+    deals: list[DealRead] = []
+    tasks: list[TaskRead] = []
+    custom_fields: list[CustomFieldValueRead] = []
+    custom_field_definitions: list[CustomFieldDefinitionRead] = []
+    stats: ContactStats
+    model_config = {"from_attributes": True}
+
+
+class CompanyStats(BaseModel):
+    total_contacts: int = 0
+    total_deals: int = 0
+    total_deal_value: float = 0.0
+    open_deals: int = 0
+    won_deals: int = 0
+    total_activities: int = 0
+    last_activity_date: datetime | None = None
+
+
+class CompanyProfile(BaseModel):
+    company: CompanyRead
+    contacts: list[ContactRead] = []
+    deals: list[DealRead] = []
+    custom_fields: list[CustomFieldValueRead] = []
+    custom_field_definitions: list[CustomFieldDefinitionRead] = []
+    stats: CompanyStats
+    model_config = {"from_attributes": True}

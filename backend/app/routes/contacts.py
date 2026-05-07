@@ -8,12 +8,21 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_scope
 from app.database import get_db
-from app.models import Contact, Tag, User, UserRole
-from app.schemas import ContactCreate, ContactRead, ContactUpdate
+from app.models import Activity, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole, contact_tags
+from app.schemas import ContactCreate, ContactProfile, ContactRead, ContactStats, ContactUpdate, CompanyRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead, TaskRead
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
+
+
+SORTABLE_COLUMNS = {
+    "first_name": Contact.first_name,
+    "last_name": Contact.last_name,
+    "email": Contact.email,
+    "job_title": Contact.job_title,
+    "created_at": Contact.created_at,
+}
 
 
 def _apply_ownership_filter(query, user: User):
@@ -27,8 +36,12 @@ async def list_contacts(
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=100),
     search: str = Query(""),
+    sort_by: str = Query("created_at"),
+    sort_dir: str = Query("desc"),
+    tag_id: str = Query(""),
+    source: str = Query(""),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:read")),
 ):
     query = select(Contact).options(selectinload(Contact.tags))
     query = _apply_ownership_filter(query, current_user)
@@ -40,10 +53,18 @@ async def list_contacts(
             | (Contact.email.ilike(f"%{search}%"))
         )
 
+    if tag_id:
+        query = query.join(contact_tags).where(contact_tags.c.tag_id == tag_id)
+
+    if source:
+        query = query.where(Contact.source == source)
+
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar() or 0
 
-    query = query.order_by(Contact.created_at.desc()).offset((page - 1) * per_page).limit(per_page)
+    col = SORTABLE_COLUMNS.get(sort_by, Contact.created_at)
+    order = col.asc().nullslast() if sort_dir == "asc" else col.desc().nullslast()
+    query = query.order_by(order).offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
     items = result.scalars().all()
 
@@ -56,11 +77,23 @@ async def list_contacts(
     }
 
 
+@router.get("/sources", response_model=list[str])
+async def list_contact_sources(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("contacts:read")),
+):
+    query = select(Contact.source).where(Contact.source.isnot(None), Contact.source != "")
+    query = _apply_ownership_filter(query, current_user)
+    query = query.distinct().order_by(Contact.source)
+    result = await db.execute(query)
+    return [row[0] for row in result.all()]
+
+
 @router.get("/{contact_id}", response_model=ContactRead)
 async def get_contact(
     contact_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:read")),
 ):
     query = select(Contact).options(selectinload(Contact.tags)).where(Contact.id == contact_id)
     query = _apply_ownership_filter(query, current_user)
@@ -75,7 +108,7 @@ async def get_contact(
 async def create_contact(
     data: ContactCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:write")),
 ):
     contact = Contact(
         **data.model_dump(exclude={"tag_ids"}),
@@ -95,7 +128,7 @@ async def update_contact(
     contact_id: UUID,
     data: ContactUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:write")),
 ):
     query = select(Contact).options(selectinload(Contact.tags)).where(Contact.id == contact_id)
     query = _apply_ownership_filter(query, current_user)
@@ -121,7 +154,7 @@ async def update_contact(
 async def delete_contact(
     contact_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:write")),
 ):
     query = select(Contact).where(Contact.id == contact_id)
     query = _apply_ownership_filter(query, current_user)
@@ -134,10 +167,74 @@ async def delete_contact(
     return {"ok": True}
 
 
+@router.get("/{contact_id}/profile", response_model=ContactProfile)
+async def get_contact_profile(
+    contact_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("contacts:read")),
+):
+    query = (
+        select(Contact)
+        .options(
+            selectinload(Contact.tags),
+            selectinload(Contact.company).selectinload(Company.tags),
+            selectinload(Contact.deals).selectinload(Deal.tags),
+            selectinload(Contact.tasks),
+            selectinload(Contact.custom_field_values),
+        )
+        .where(Contact.id == contact_id)
+    )
+    query = _apply_ownership_filter(query, current_user)
+    result = await db.execute(query)
+    contact = result.scalar_one_or_none()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    # Custom field definitions for contacts
+    defs_result = await db.execute(
+        select(CustomFieldDefinition).where(CustomFieldDefinition.entity_type == "contact").order_by(CustomFieldDefinition.name)
+    )
+    definitions = defs_result.scalars().all()
+
+    # Compute stats
+    closed_stages = {DealStage.CLOSED_WON, DealStage.CLOSED_LOST}
+    deals = contact.deals or []
+    tasks = contact.tasks or []
+
+    # Last activity date
+    last_act_q = select(func.max(Activity.activity_date)).where(Activity.contact_id == contact_id)
+    last_activity_date = (await db.execute(last_act_q)).scalar()
+
+    # Total activities count
+    act_count_q = select(func.count()).select_from(Activity).where(Activity.contact_id == contact_id)
+    total_activities = (await db.execute(act_count_q)).scalar() or 0
+
+    stats = ContactStats(
+        total_deals=len(deals),
+        total_deal_value=sum(d.value or 0 for d in deals),
+        open_deals=sum(1 for d in deals if d.stage not in closed_stages),
+        won_deals=sum(1 for d in deals if d.stage == DealStage.CLOSED_WON),
+        total_activities=total_activities,
+        total_tasks=len(tasks),
+        open_tasks=sum(1 for t in tasks if t.status != TaskStatus.DONE),
+        last_activity_date=last_activity_date,
+    )
+
+    return ContactProfile(
+        contact=ContactRead.model_validate(contact),
+        company=CompanyRead.model_validate(contact.company) if contact.company else None,
+        deals=[DealRead.model_validate(d) for d in deals],
+        tasks=[TaskRead.model_validate(t) for t in tasks],
+        custom_fields=[CustomFieldValueRead.model_validate(v) for v in (contact.custom_field_values or [])],
+        custom_field_definitions=[CustomFieldDefinitionRead.model_validate(d) for d in definitions],
+        stats=stats,
+    )
+
+
 @router.get("/export/csv")
 async def export_contacts_csv(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:read")),
 ):
     query = select(Contact)
     query = _apply_ownership_filter(query, current_user)
@@ -168,7 +265,7 @@ def _sanitize_csv_value(val: str | None) -> str | None:
 async def import_contacts_csv(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("contacts:write")),
 ):
     MAX_SIZE = 5 * 1024 * 1024  # 5MB
     MAX_ROWS = 10000

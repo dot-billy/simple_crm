@@ -6,6 +6,26 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/lib/api";
 import { Users, Building2, Handshake, DollarSign } from "lucide-react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
+
+interface DashboardCharts {
+  deals_over_time: Array<{ week: string; count: number }>;
+  revenue_by_stage: Record<string, number>;
+  contacts_by_source: Record<string, number>;
+  task_completion: Record<string, number>;
+}
 
 interface DashboardData {
   total_contacts: number;
@@ -15,6 +35,7 @@ interface DashboardData {
   deals_by_stage: Record<string, number>;
   recent_activities: Array<{ id: string; type: string; subject: string; activity_date: string }>;
   upcoming_tasks: Array<{ id: string; title: string; status: string; due_date: string | null }>;
+  charts: DashboardCharts;
 }
 
 const stageLabels: Record<string, string> = {
@@ -35,12 +56,28 @@ const stageColors: Record<string, string> = {
   closed_lost: "bg-red-100 text-red-800",
 };
 
+const COLORS = ["#6366f1", "#8b5cf6", "#a78bfa", "#c4b5fd", "#22c55e", "#ef4444"];
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
 
   useEffect(() => {
     apiFetch<DashboardData>("/api/dashboard").then(setData);
   }, []);
+
+  const barChartData = data
+    ? Object.entries(data.deals_by_stage).map(([stage, count]) => ({
+        stage: stageLabels[stage] || stage,
+        count,
+      }))
+    : [];
+
+  const pieChartData = data?.charts?.contacts_by_source
+    ? Object.entries(data.charts.contacts_by_source).map(([name, value]) => ({
+        name,
+        value,
+      }))
+    : [];
 
   return (
     <AppShell>
@@ -89,25 +126,23 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* Pipeline + Recent */}
+        {/* Pipeline bar chart + Recent activities */}
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Pipeline breakdown */}
+          {/* Pipeline breakdown - bar chart */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Pipeline by Stage</CardTitle>
             </CardHeader>
             <CardContent>
-              {data?.deals_by_stage && Object.keys(data.deals_by_stage).length > 0 ? (
-                <div className="space-y-3">
-                  {Object.entries(data.deals_by_stage).map(([stage, count]) => (
-                    <div key={stage} className="flex items-center justify-between">
-                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${stageColors[stage] || ""}`}>
-                        {stageLabels[stage] || stage}
-                      </span>
-                      <span className="text-sm font-medium">{count}</span>
-                    </div>
-                  ))}
-                </div>
+              {barChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={barChartData}>
+                    <XAxis dataKey="stage" tick={{ fontSize: 12 }} />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               ) : (
                 <p className="text-sm text-muted-foreground">No deals yet</p>
               )}
@@ -134,6 +169,67 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">No recent activities</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Deals over time + Contacts by source */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Deals Over Time</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {data?.charts?.deals_over_time && data.charts.deals_over_time.length > 0 ? (
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={data.charts.deals_over_time}>
+                    <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip />
+                    <Line
+                      type="monotone"
+                      dataKey="count"
+                      stroke="#6366f1"
+                      strokeWidth={2}
+                      dot={{ fill: "#6366f1" }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-muted-foreground">No deal history yet</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Contacts by Source</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {pieChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={250}>
+                  <PieChart>
+                    <Pie
+                      data={pieChartData}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={90}
+                      dataKey="value"
+                      nameKey="name"
+                      label={({ name, percent }) =>
+                        `${name} ${(percent * 100).toFixed(0)}%`
+                      }
+                    >
+                      {pieChartData.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-muted-foreground">No contact sources yet</p>
               )}
             </CardContent>
           </Card>
