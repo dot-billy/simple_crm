@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ActivityForm } from "@/components/activity-form";
 import { HistoryPanel } from "@/components/history-panel";
+import { InlineEditField } from "@/components/inline-edit-field";
 import { apiFetch } from "@/lib/api";
 import {
   ArrowLeft, User, Building2, Calendar, Pencil, DollarSign, Clock,
@@ -31,6 +32,7 @@ interface DealProfile {
     owner_id: string | null;
     expected_close_date: string | null;
     notes: string | null;
+    probability: number | null;
     tags: Array<{ id: string; name: string; color: string }>;
     created_at: string;
     updated_at: string;
@@ -239,6 +241,47 @@ export default function DealProfilePage() {
         <div className="grid gap-6 md:grid-cols-3">
           {/* Left column */}
           <div className="space-y-6 md:col-span-2">
+            {/* Deal Info */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Deal Information</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground shrink-0 text-xs uppercase">Title</span>
+                    <InlineEditField url={`/api/deals/${dealId}`} field="title" value={deal.title} onSaved={load} />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground shrink-0 text-xs uppercase">Value</span>
+                    <InlineEditField url={`/api/deals/${dealId}`} field="value" value={deal.value} type="number" onSaved={load} />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground shrink-0 text-xs uppercase">Close</span>
+                    <InlineEditField
+                      url={`/api/deals/${dealId}`}
+                      field="expected_close_date"
+                      value={deal.expected_close_date ? deal.expected_close_date.slice(0, 10) : null}
+                      type="date"
+                      placeholder="Set close date"
+                      onSaved={load}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground shrink-0 text-xs uppercase">Probability</span>
+                    <InlineEditField
+                      url={`/api/deals/${dealId}`}
+                      field="probability"
+                      value={deal.probability !== null && deal.probability !== undefined ? deal.probability : null}
+                      type="number"
+                      placeholder="0-100"
+                      onSaved={load}
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Notes */}
             <Card>
               <CardHeader className="pb-3">

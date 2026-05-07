@@ -15,6 +15,7 @@ import { Timeline } from "@/components/timeline";
 import { ActivityForm } from "@/components/activity-form";
 import { CustomFields } from "@/components/custom-fields";
 import { HistoryPanel } from "@/components/history-panel";
+import { InlineEditField } from "@/components/inline-edit-field";
 import { apiFetch } from "@/lib/api";
 import {
   ArrowLeft, Mail, Phone, Briefcase, Building2, Tag, Calendar,
@@ -210,27 +211,47 @@ export default function ContactProfilePage() {
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="flex items-center gap-2 text-sm">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
-                    {contact.email ? (
-                      <a href={`mailto:${contact.email}`} className="text-primary hover:underline">{contact.email}</a>
-                    ) : (
-                      <span className="text-muted-foreground">No email</span>
-                    )}
+                    <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <InlineEditField
+                      url={`/api/contacts/${contactId}`}
+                      field="email"
+                      value={contact.email}
+                      type="email"
+                      placeholder="Add email"
+                      onSaved={load}
+                    />
                   </div>
                   <div className="flex items-center gap-2 text-sm">
-                    <Phone className="h-4 w-4 text-muted-foreground" />
-                    {contact.phone ? (
-                      <a href={`tel:${contact.phone}`} className="hover:underline">{contact.phone}</a>
-                    ) : (
-                      <span className="text-muted-foreground">No phone</span>
-                    )}
+                    <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <InlineEditField
+                      url={`/api/contacts/${contactId}`}
+                      field="phone"
+                      value={contact.phone}
+                      type="tel"
+                      placeholder="Add phone"
+                      onSaved={load}
+                    />
                   </div>
-                  {contact.source && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Tag className="h-4 w-4 text-muted-foreground" />
-                      <span>Source: {contact.source}</span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2 text-sm">
+                    <Briefcase className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <InlineEditField
+                      url={`/api/contacts/${contactId}`}
+                      field="job_title"
+                      value={contact.job_title}
+                      placeholder="Add job title"
+                      onSaved={load}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Tag className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <InlineEditField
+                      url={`/api/contacts/${contactId}`}
+                      field="source"
+                      value={contact.source}
+                      placeholder="Add source"
+                      onSaved={load}
+                    />
+                  </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                     <span>Added {new Date(contact.created_at).toLocaleDateString()}</span>

@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Timeline } from "@/components/timeline";
 import { HistoryPanel } from "@/components/history-panel";
+import { InlineEditField } from "@/components/inline-edit-field";
 import { ActivityForm } from "@/components/activity-form";
 import { CustomFields } from "@/components/custom-fields";
 import { apiFetch } from "@/lib/api";
@@ -202,18 +203,26 @@ export default function CompanyProfilePage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {company.phone && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Phone className="h-4 w-4 text-muted-foreground" />
-                      <a href={`tel:${company.phone}`} className="hover:underline">{company.phone}</a>
-                    </div>
-                  )}
-                  {company.address && (
-                    <div className="flex items-start gap-2 text-sm">
-                      <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span>{company.address}</span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2 text-sm">
+                    <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <InlineEditField url={`/api/companies/${companyId}`} field="domain" value={company.domain} placeholder="Add domain" onSaved={load} />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <InlineEditField url={`/api/companies/${companyId}`} field="phone" value={company.phone} type="tel" placeholder="Add phone" onSaved={load} />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground shrink-0 text-xs uppercase">Industry</span>
+                    <InlineEditField url={`/api/companies/${companyId}`} field="industry" value={company.industry} placeholder="Add industry" onSaved={load} />
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground shrink-0 text-xs uppercase">Size</span>
+                    <InlineEditField url={`/api/companies/${companyId}`} field="size" value={company.size} placeholder="e.g. 50-100" onSaved={load} />
+                  </div>
+                  <div className="flex items-start gap-2 text-sm sm:col-span-2">
+                    <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <InlineEditField url={`/api/companies/${companyId}`} field="address" value={company.address} type="textarea" placeholder="Add address" onSaved={load} />
+                  </div>
                 </div>
 
                 {/* Notes */}
