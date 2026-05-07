@@ -42,6 +42,25 @@ from app.schemas import (
 router = APIRouter(prefix="/api/email", tags=["email"])
 limiter = Limiter(key_func=get_remote_address)
 
+
+# Per-user send rate limit: in-memory sliding 1-hour window keyed by user id.
+import time as _time
+from collections import deque as _deque
+_USER_SEND_LOG: dict[str, _deque] = {}
+SEND_RATE_LIMIT_PER_HOUR = 30
+
+
+def _check_send_rate(user: User) -> None:
+    key = str(user.id)
+    now = _time.monotonic()
+    window_start = now - 3600.0
+    log = _USER_SEND_LOG.setdefault(key, _deque())
+    while log and log[0] < window_start:
+        log.popleft()
+    if len(log) >= SEND_RATE_LIMIT_PER_HOUR:
+        raise HTTPException(status_code=429, detail=f"Send rate limit exceeded ({SEND_RATE_LIMIT_PER_HOUR}/hr)")
+    log.append(now)
+
 # Transparent 1x1 GIF pixel
 TRACKING_PIXEL = base64.b64decode(
     "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
@@ -89,6 +108,20 @@ async def get_template_variables(
     current_user: User = Depends(require_scope("email:read")),
 ):
     return TEMPLATE_VARIABLES
+
+
+@router.get("/config-status")
+async def get_config_status(
+    current_user: User = Depends(require_scope("email:read")),
+):
+    """Tell the UI whether Gmail integration is actually wired up."""
+    import os
+    configured = bool(settings.GOOGLE_SERVICE_ACCOUNT_FILE) and os.path.isfile(settings.GOOGLE_SERVICE_ACCOUNT_FILE or "")
+    return {
+        "configured": configured,
+        "credentials_path_set": bool(settings.GOOGLE_SERVICE_ACCOUNT_FILE),
+        "send_rate_limit_per_hour": SEND_RATE_LIMIT_PER_HOUR,
+    }
 
 
 # --- Sync ---
@@ -192,6 +225,7 @@ async def send(
 ):
     if not settings.GOOGLE_SERVICE_ACCOUNT_FILE:
         raise HTTPException(status_code=400, detail="Gmail integration not configured")
+    _check_send_rate(current_user)
 
     # Load related entities for template variable substitution
     contact = None
@@ -445,3 +479,30 @@ async def delete_template(
     await db.delete(template)
     await db.commit()
     return {"ok": True}
+
+
+class _SampleObj:
+    """Light object that mimics getattr for template substitution."""
+    def __init__(self, attrs: dict):
+        for k, v in attrs.items():
+            setattr(self, k, v)
+
+
+@router.get("/templates/{template_id}/preview")
+async def preview_template(
+    template_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("email:read")),
+):
+    template = (await db.execute(select(EmailTemplate).where(EmailTemplate.id == template_id))).scalar_one_or_none()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    sample_contact = _SampleObj({"first_name": "Jane", "last_name": "Doe", "email": "jane@example.com", "phone": "+1 555 0100", "job_title": "VP Engineering"})
+    sample_company = _SampleObj({"name": "Acme Inc.", "domain": "acme.com", "industry": "SaaS", "size": "50-100"})
+    sample_deal = _SampleObj({"title": "Acme Annual Contract", "value": 25000, "currency": "USD", "stage": "proposal"})
+
+    return {
+        "subject": _substitute_variables(template.subject or "", contact=sample_contact, deal=sample_deal, company=sample_company, user=current_user),
+        "body_html": _substitute_variables(template.body_html or "", contact=sample_contact, deal=sample_deal, company=sample_company, user=current_user),
+    }

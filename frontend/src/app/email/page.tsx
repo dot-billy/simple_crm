@@ -106,6 +106,7 @@ export default function EmailPage() {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null);
   const [trackingEvents, setTrackingEvents] = useState<TrackingEvent[]>([]);
+  const [configStatus, setConfigStatus] = useState<{ configured: boolean; send_rate_limit_per_hour: number } | null>(null);
 
   // Compose state
   const [composeOpen, setComposeOpen] = useState(false);
@@ -144,6 +145,7 @@ export default function EmailPage() {
   useEffect(() => {
     loadEmails();
     loadSyncStatus();
+    apiFetch<{ configured: boolean; send_rate_limit_per_hour: number }>("/api/email/config-status").then(setConfigStatus).catch(() => {});
   }, [loadEmails, loadSyncStatus]);
 
   useEffect(() => {
@@ -241,7 +243,15 @@ export default function EmailPage() {
     <AppShell>
       <div className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-2xl font-bold sm:text-3xl">Email</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold sm:text-3xl">Email</h2>
+            {configStatus && (
+              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${configStatus.configured ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${configStatus.configured ? "bg-green-500" : "bg-red-500"}`} />
+                Gmail {configStatus.configured ? "configured" : "not configured"}
+              </span>
+            )}
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {syncStatus && (
               <span className="text-xs text-muted-foreground">
