@@ -6,6 +6,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { apiFetch } from "@/lib/api";
 import { Check, Pencil, X } from "lucide-react";
 
+function parseOptions(raw: string | null): string[] {
+  if (!raw) return [];
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+      // fall through to comma-separated parsing
+    }
+  }
+  return trimmed.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
 interface CustomFieldDefinition {
   id: string;
   name: string;
@@ -71,7 +85,7 @@ export function CustomFields({ entityType, entityId, definitions, values, onUpda
       {definitions.map((def) => {
         const currentValue = getValueForDef(def.id);
         const isEditing = editingId === def.id;
-        const options = def.options ? JSON.parse(def.options) : [];
+        const options = parseOptions(def.options);
 
         return (
           <div key={def.id} className="flex items-start justify-between gap-2">
