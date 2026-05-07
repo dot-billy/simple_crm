@@ -2,7 +2,7 @@ import csv
 import io
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,7 @@ def _apply_ownership_filter(query, user: User):
 
 @router.get("", response_model=dict)
 async def list_contacts(
+    request: Request,
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=100),
     search: str = Query(""),
@@ -41,6 +42,7 @@ async def list_contacts(
     sort_dir: str = Query("desc"),
     tag_id: str = Query(""),
     source: str = Query(""),
+    include_custom_fields: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_scope("contacts:read")),
 ):
@@ -60,6 +62,19 @@ async def list_contacts(
     if source:
         query = query.where(Contact.source == source)
 
+    # Custom field filters: ?cf_<field_id>=value matches CustomFieldValue.value
+    cf_filters = {k[3:]: v for k, v in request.query_params.items() if k.startswith("cf_") and v}
+    for field_id, val in cf_filters.items():
+        try:
+            fid = UUID(field_id)
+        except ValueError:
+            continue
+        sub = (
+            select(CustomFieldValue.contact_id)
+            .where(CustomFieldValue.field_id == fid, CustomFieldValue.value.ilike(f"%{val}%"))
+        )
+        query = query.where(Contact.id.in_(sub))
+
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar() or 0
 
@@ -69,8 +84,20 @@ async def list_contacts(
     result = await db.execute(query)
     items = result.scalars().all()
 
+    items_data = [ContactRead.model_validate(c).model_dump(mode="json") for c in items]
+    if include_custom_fields and items:
+        ids = [c.id for c in items]
+        cfvs = (await db.execute(select(CustomFieldValue).where(CustomFieldValue.contact_id.in_(ids)))).scalars().all()
+        by_contact: dict = {}
+        for v in cfvs:
+            by_contact.setdefault(str(v.contact_id), []).append({
+                "field_id": str(v.field_id), "value": v.value,
+            })
+        for d in items_data:
+            d["custom_fields"] = by_contact.get(d["id"], [])
+
     return {
-        "items": [ContactRead.model_validate(c) for c in items],
+        "items": items_data,
         "total": total,
         "page": page,
         "per_page": per_page,

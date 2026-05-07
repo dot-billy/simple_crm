@@ -2,7 +2,7 @@ import csv
 import io
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -32,6 +32,7 @@ def _apply_ownership_filter(query, user: User):
 
 @router.get("", response_model=dict)
 async def list_companies(
+    request: Request,
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=100),
     search: str = Query(""),
@@ -39,6 +40,7 @@ async def list_companies(
     sort_dir: str = Query("desc"),
     tag_id: str = Query(""),
     industry: str = Query(""),
+    include_custom_fields: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_scope("companies:read")),
 ):
@@ -52,6 +54,17 @@ async def list_companies(
         query = query.join(company_tags).where(company_tags.c.tag_id == tag_id)
     if industry:
         query = query.where(Company.industry == industry)
+    cf_filters = {k[3:]: v for k, v in request.query_params.items() if k.startswith("cf_") and v}
+    for field_id, val in cf_filters.items():
+        try:
+            fid = UUID(field_id)
+        except ValueError:
+            continue
+        sub = (
+            select(CustomFieldValue.company_id)
+            .where(CustomFieldValue.field_id == fid, CustomFieldValue.value.ilike(f"%{val}%"))
+        )
+        query = query.where(Company.id.in_(sub))
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar() or 0
     col = SORTABLE_COLUMNS.get(sort_by, Company.created_at)
@@ -59,8 +72,19 @@ async def list_companies(
     query = query.order_by(order).offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
     items = result.scalars().all()
+    items_data = [CompanyRead.model_validate(c).model_dump(mode="json") for c in items]
+    if include_custom_fields and items:
+        ids = [c.id for c in items]
+        cfvs = (await db.execute(select(CustomFieldValue).where(CustomFieldValue.company_id.in_(ids)))).scalars().all()
+        by_company: dict = {}
+        for v in cfvs:
+            by_company.setdefault(str(v.company_id), []).append({
+                "field_id": str(v.field_id), "value": v.value,
+            })
+        for d in items_data:
+            d["custom_fields"] = by_company.get(d["id"], [])
     return {
-        "items": [CompanyRead.model_validate(c) for c in items],
+        "items": items_data,
         "total": total, "page": page, "per_page": per_page,
         "pages": (total + per_page - 1) // per_page if per_page else 0,
     }

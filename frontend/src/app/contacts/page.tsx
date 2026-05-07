@@ -15,6 +15,7 @@ import { Plus, Search, Download, Upload, Trash2, Clock, ArrowUpDown, ChevronUp, 
 import { Timeline } from "@/components/timeline";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { SavedViewsPicker } from "@/components/saved-views-picker";
+import { ColumnPicker, useCustomFieldColumns } from "@/components/custom-field-columns";
 
 interface Contact {
   id: string;
@@ -27,6 +28,7 @@ interface Contact {
   source: string | null;
   tags: Array<{ id: string; name: string; color: string }>;
   created_at: string;
+  custom_fields?: Array<{ field_id: string; value: string }>;
 }
 
 interface PaginatedContacts {
@@ -49,6 +51,7 @@ export default function ContactsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [timelineContactId, setTimelineContactId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const cf = useCustomFieldColumns("contact");
   const [form, setForm] = useState({ first_name: "", last_name: "", email: "", phone: "", job_title: "", source: "" });
 
   const load = useCallback(() => {
@@ -60,8 +63,12 @@ export default function ContactsPage() {
     });
     if (tagFilter) params.set("tag_id", tagFilter);
     if (sourceFilter) params.set("source", sourceFilter);
+    if (cf.visible.length > 0) params.set("include_custom_fields", "true");
+    Object.entries(cf.filters).forEach(([fid, val]) => {
+      if (val) params.set(`cf_${fid}`, val);
+    });
     apiFetch<PaginatedContacts>(`/api/contacts?${params}`).then(setData);
-  }, [page, search, sortBy, sortDir, tagFilter, sourceFilter]);
+  }, [page, search, sortBy, sortDir, tagFilter, sourceFilter, cf.visible, cf.filters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -183,18 +190,28 @@ export default function ContactsPage() {
           />
         </div>
 
-        <SavedViewsPicker
-          entity="contact"
-          currentFilters={{ search, sortBy, sortDir, tagFilter, sourceFilter }}
-          onApply={(f) => {
-            if (typeof f.search === "string") setSearch(f.search);
-            if (typeof f.sortBy === "string") setSortBy(f.sortBy);
-            if (f.sortDir === "asc" || f.sortDir === "desc") setSortDir(f.sortDir);
-            if (typeof f.tagFilter === "string") setTagFilter(f.tagFilter);
-            if (typeof f.sourceFilter === "string") setSourceFilter(f.sourceFilter);
-            setPage(1);
-          }}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <SavedViewsPicker
+            entity="contact"
+            currentFilters={{ search, sortBy, sortDir, tagFilter, sourceFilter, cfVisible: cf.visible, cfFilters: cf.filters }}
+            onApply={(f) => {
+              if (typeof f.search === "string") setSearch(f.search);
+              if (typeof f.sortBy === "string") setSortBy(f.sortBy);
+              if (f.sortDir === "asc" || f.sortDir === "desc") setSortDir(f.sortDir);
+              if (typeof f.tagFilter === "string") setTagFilter(f.tagFilter);
+              if (typeof f.sourceFilter === "string") setSourceFilter(f.sourceFilter);
+              if (Array.isArray(f.cfVisible)) cf.setVisible(f.cfVisible as string[]);
+              setPage(1);
+            }}
+          />
+          <ColumnPicker
+            entity="contact"
+            visibleFieldIds={cf.visible}
+            filters={cf.filters}
+            onChangeVisibility={cf.setVisible}
+            onChangeFilter={cf.setFilter}
+          />
+        </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <Select value={tagFilter || "all"} onValueChange={(v) => { setTagFilter(v === "all" ? "" : v); setPage(1); }}>
@@ -266,6 +283,22 @@ export default function ContactsPage() {
                     </button>
                   </th>
                   <th className="p-4">Tags</th>
+                  {cf.visible.map((fid) => {
+                    const def = cf.definitions.find((d) => d.id === fid);
+                    return (
+                      <th key={fid} className="p-4">
+                        <div className="flex flex-col gap-1">
+                          <span>{def?.name || "Custom"}</span>
+                          <Input
+                            placeholder="Filter…"
+                            className="h-7 text-xs"
+                            value={cf.filters[fid] || ""}
+                            onChange={(e) => { cf.setFilter(fid, e.target.value); setPage(1); }}
+                          />
+                        </div>
+                      </th>
+                    );
+                  })}
                   <th className="p-4 w-24"></th>
                 </tr>
               </thead>
@@ -295,6 +328,10 @@ export default function ContactsPage() {
                         ))}
                       </div>
                     </td>
+                    {cf.visible.map((fid) => {
+                      const v = c.custom_fields?.find((x) => x.field_id === fid);
+                      return <td key={fid} className="p-4 text-sm">{v?.value || "-"}</td>;
+                    })}
                     <td className="p-4">
                       <div className="flex items-center gap-1">
                         <Button variant="ghost" size="icon" onClick={() => setTimelineContactId(c.id)} title="Timeline">
