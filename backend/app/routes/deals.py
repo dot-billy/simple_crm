@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
 from app.models import Activity, ActivityType, Deal, DealStage, Tag, User, UserRole
+from app.routes.notifications import add_notification
 from app.schemas import DealCreate, DealRead, DealStageUpdate, DealUpdate
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
@@ -80,14 +81,28 @@ async def update_deal(deal_id: UUID, data: DealUpdate, db: AsyncSession = Depend
     deal = result.scalar_one_or_none()
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
+    old_owner_id = deal.owner_id
     for field, value in data.model_dump(exclude_unset=True, exclude={"tag_ids"}).items():
         setattr(deal, field, value)
     if data.tag_ids is not None:
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         deal.tags = list(tags)
+    if (
+        deal.owner_id
+        and deal.owner_id != old_owner_id
+        and deal.owner_id != current_user.id
+    ):
+        add_notification(
+            db,
+            user_id=deal.owner_id,
+            title=f"Deal assigned to you: {deal.title}",
+            message=f"{current_user.full_name or current_user.email} assigned this deal to you.",
+            entity_type="deal",
+            entity_id=deal.id,
+        )
     await db.commit()
-    await db.refresh(deal, ["tags"])
-    return deal
+    refreshed = await db.execute(select(Deal).options(selectinload(Deal.tags)).where(Deal.id == deal.id))
+    return refreshed.scalar_one()
 
 
 @router.delete("/{deal_id}")
@@ -116,6 +131,7 @@ async def update_deal_stage(
     deal = result.scalar_one_or_none()
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
+    old_stage = deal.stage
     deal.stage = data.stage
     activity = Activity(
         type=ActivityType.NOTE,
@@ -124,9 +140,24 @@ async def update_deal_stage(
         created_by=current_user.id,
     )
     db.add(activity)
+    if deal.owner_id and deal.owner_id != current_user.id and old_stage != data.stage:
+        if data.stage == DealStage.CLOSED_WON:
+            title = f"Deal won: {deal.title}"
+        elif data.stage == DealStage.CLOSED_LOST:
+            title = f"Deal lost: {deal.title}"
+        else:
+            title = f"Deal stage changed: {deal.title}"
+        add_notification(
+            db,
+            user_id=deal.owner_id,
+            title=title,
+            message=f"{current_user.full_name or current_user.email} moved this deal from {old_stage.value} to {data.stage.value}.",
+            entity_type="deal",
+            entity_id=deal.id,
+        )
     await db.commit()
-    await db.refresh(deal, ["tags"])
-    return deal
+    refreshed = await db.execute(select(Deal).options(selectinload(Deal.tags)).where(Deal.id == deal.id))
+    return refreshed.scalar_one()
 
 
 def _sanitize_csv_value(val: str | None) -> str | None:

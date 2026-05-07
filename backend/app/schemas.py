@@ -228,6 +228,7 @@ class DealUpdate(BaseModel):
     stage: DealStage | None = None
     contact_id: UUID | None = None
     company_id: UUID | None = None
+    owner_id: UUID | None = None
     expected_close_date: datetime | None = None
     notes: str | None = Field(None, max_length=5000)
     tag_ids: list[UUID] | None = None

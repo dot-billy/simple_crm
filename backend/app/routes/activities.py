@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user, require_scope
 from app.database import get_db
 from app.models import Activity, Contact, Deal, EmailMessage, Task, User, UserRole
+from app.routes.notifications import add_notification
 from app.schemas import ActivityCreate, ActivityRead, PaginatedTimelineResponse, TimelineItem
 
 router = APIRouter(prefix="/api/activities", tags=["activities"])
@@ -46,6 +47,17 @@ async def list_activities(
 async def create_activity(data: ActivityCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("activities:write"))):
     activity = Activity(**data.model_dump(), created_by=current_user.id)
     db.add(activity)
+    if activity.contact_id:
+        contact = (await db.execute(select(Contact).where(Contact.id == activity.contact_id))).scalar_one_or_none()
+        if contact and contact.owner_id and contact.owner_id != current_user.id:
+            add_notification(
+                db,
+                user_id=contact.owner_id,
+                title=f"New activity on {contact.first_name} {contact.last_name}",
+                message=f"{current_user.full_name or current_user.email} logged: {activity.subject}",
+                entity_type="contact",
+                entity_id=contact.id,
+            )
     await db.commit()
     await db.refresh(activity)
     return activity

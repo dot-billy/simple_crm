@@ -14,6 +14,7 @@ from app.auth import hash_password
 from app.config import settings
 from app.database import engine, async_session, Base
 from app.gmail_sync_worker import gmail_sync_loop
+from app.notification_worker import notification_worker_loop
 from app.models import User, UserRole
 from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email, search, notifications, api_keys, service_accounts, agent
 
@@ -48,10 +49,13 @@ async def lifespan(app: FastAPI):
 
     # Start background Gmail sync worker
     sync_task = asyncio.create_task(gmail_sync_loop())
+    # Start background notification worker (due-soon task scans)
+    notif_task = asyncio.create_task(notification_worker_loop())
 
     yield
 
     sync_task.cancel()
+    notif_task.cancel()
     await engine.dispose()
 
 

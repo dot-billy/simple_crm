@@ -12,7 +12,7 @@ from app.schemas import NotificationRead, PaginatedNotificationResponse
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 
-async def create_notification(
+def add_notification(
     db: AsyncSession,
     user_id: UUID,
     title: str,
@@ -28,6 +28,18 @@ async def create_notification(
         entity_id=entity_id,
     )
     db.add(notification)
+    return notification
+
+
+async def create_notification(
+    db: AsyncSession,
+    user_id: UUID,
+    title: str,
+    message: str | None = None,
+    entity_type: str | None = None,
+    entity_id: UUID | None = None,
+) -> Notification:
+    notification = add_notification(db, user_id, title, message, entity_type, entity_id)
     await db.commit()
     await db.refresh(notification)
     return notification

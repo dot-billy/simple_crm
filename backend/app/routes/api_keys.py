@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user, hash_password
 from app.database import get_db
 from app.models import APIKey, User
+from app.routes.notifications import add_notification
 from app.schemas import APIKeyCreate, APIKeyCreated, APIKeyRead
 
 router = APIRouter(prefix="/api/api-keys", tags=["api_keys"])
@@ -50,6 +51,15 @@ async def create_api_key(
         expires_at=expires_at,
     )
     db.add(api_key)
+    await db.flush()
+    add_notification(
+        db,
+        user_id=current_user.id,
+        title="API key created",
+        message=f"A new API key '{data.name}' was created on your account. If this wasn't you, revoke it immediately.",
+        entity_type="api_key",
+        entity_id=api_key.id,
+    )
     await db.commit()
     await db.refresh(api_key)
 
@@ -79,5 +89,13 @@ async def deactivate_api_key(
     if not api_key:
         raise HTTPException(status_code=404, detail="API key not found")
     api_key.is_active = False
+    add_notification(
+        db,
+        user_id=current_user.id,
+        title="API key revoked",
+        message=f"API key '{api_key.name}' was revoked.",
+        entity_type="api_key",
+        entity_id=api_key.id,
+    )
     await db.commit()
     return {"ok": True}

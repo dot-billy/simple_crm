@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user, require_scope
 from app.database import get_db
 from app.models import Task, User, UserRole
+from app.routes.notifications import add_notification
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -49,6 +50,16 @@ async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db), curr
     if task.assigned_to is None:
         task.assigned_to = current_user.id
     db.add(task)
+    await db.flush()
+    if task.assigned_to and task.assigned_to != current_user.id:
+        add_notification(
+            db,
+            user_id=task.assigned_to,
+            title=f"Task assigned: {task.title}",
+            message=f"{current_user.full_name or current_user.email} assigned you a task.",
+            entity_type="task",
+            entity_id=task.id,
+        )
     await db.commit()
     await db.refresh(task)
     return task
@@ -63,8 +74,22 @@ async def update_task(task_id: UUID, data: TaskUpdate, db: AsyncSession = Depend
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    old_assigned_to = task.assigned_to
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(task, field, value)
+    if (
+        task.assigned_to
+        and task.assigned_to != old_assigned_to
+        and task.assigned_to != current_user.id
+    ):
+        add_notification(
+            db,
+            user_id=task.assigned_to,
+            title=f"Task assigned: {task.title}",
+            message=f"{current_user.full_name or current_user.email} assigned you a task.",
+            entity_type="task",
+            entity_id=task.id,
+        )
     await db.commit()
     await db.refresh(task)
     return task
