@@ -217,6 +217,7 @@ class Deal(Base):
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     expected_close_date = Column(DateTime(timezone=True))
     notes = Column(Text)
+    probability = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

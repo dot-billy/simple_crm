@@ -5,7 +5,8 @@ import { AppShell } from "@/components/app-shell";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/lib/api";
-import { Users, Building2, Handshake, DollarSign } from "lucide-react";
+import { Users, Building2, Handshake, DollarSign, TrendingUp, Target, Clock, Trophy } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   BarChart,
   Bar,
@@ -38,6 +39,19 @@ interface DashboardData {
   charts: DashboardCharts;
 }
 
+interface PipelineMetrics {
+  range_days: number;
+  win_rate_pct: number;
+  won_count: number;
+  lost_count: number;
+  velocity_days: number;
+  forecast: number;
+  open_value: number;
+  open_count: number;
+  funnel: Array<{ stage: string; count: number }>;
+  avg_time_in_stage_days: Record<string, number>;
+}
+
 const stageLabels: Record<string, string> = {
   lead: "Lead",
   qualified: "Qualified",
@@ -60,10 +74,16 @@ const COLORS = ["#6366f1", "#8b5cf6", "#a78bfa", "#c4b5fd", "#22c55e", "#ef4444"
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [metrics, setMetrics] = useState<PipelineMetrics | null>(null);
+  const [rangeDays, setRangeDays] = useState("90");
 
   useEffect(() => {
     apiFetch<DashboardData>("/api/dashboard").then(setData);
   }, []);
+
+  useEffect(() => {
+    apiFetch<PipelineMetrics>(`/api/dashboard/pipeline-metrics?days=${rangeDays}`).then(setMetrics);
+  }, [rangeDays]);
 
   const barChartData = data
     ? Object.entries(data.deals_by_stage).map(([stage, count]) => ({
@@ -124,6 +144,87 @@ export default function DashboardPage() {
               </p>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Pipeline metrics */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-semibold">Pipeline Metrics</h3>
+            <Select value={rangeDays} onValueChange={setRangeDays}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="30">Last 30 days</SelectItem>
+                <SelectItem value="90">Last 90 days</SelectItem>
+                <SelectItem value="180">Last 6 months</SelectItem>
+                <SelectItem value="365">Last 12 months</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Win Rate</CardTitle>
+                <Trophy className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{metrics ? `${metrics.win_rate_pct}%` : "..."}</p>
+                {metrics && (
+                  <p className="text-xs text-muted-foreground">{metrics.won_count} won / {metrics.lost_count} lost</p>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Avg Velocity</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{metrics ? `${metrics.velocity_days}d` : "..."}</p>
+                <p className="text-xs text-muted-foreground">Created → Won</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Forecast</CardTitle>
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{metrics ? `$${metrics.forecast.toLocaleString()}` : "..."}</p>
+                {metrics && (
+                  <p className="text-xs text-muted-foreground">{metrics.open_count} open · ${metrics.open_value.toLocaleString()}</p>
+                )}
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Open Pipeline</CardTitle>
+                <Target className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{metrics ? `$${metrics.open_value.toLocaleString()}` : "..."}</p>
+                <p className="text-xs text-muted-foreground">Sum of open deal values</p>
+              </CardContent>
+            </Card>
+          </div>
+          {metrics && Object.keys(metrics.avg_time_in_stage_days).length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Avg Time in Stage</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap gap-3">
+                  {Object.entries(metrics.avg_time_in_stage_days).map(([stage, days]) => (
+                    <div key={stage} className="rounded-md border px-3 py-2">
+                      <p className="text-xs text-muted-foreground capitalize">{stageLabels[stage] || stage}</p>
+                      <p className="text-lg font-semibold">{days}d</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Pipeline bar chart + Recent activities */}

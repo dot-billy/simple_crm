@@ -191,6 +191,16 @@ class CompanyUpdate(BaseModel):
 
 # --- Deal ---
 
+_STAGE_DEFAULT_PROBABILITY = {
+    "lead": 10.0,
+    "qualified": 25.0,
+    "proposal": 50.0,
+    "negotiation": 75.0,
+    "closed_won": 100.0,
+    "closed_lost": 0.0,
+}
+
+
 class DealCreate(BaseModel):
     title: str = Field(max_length=255)
     value: float = 0
@@ -200,6 +210,7 @@ class DealCreate(BaseModel):
     company_id: UUID | None = None
     expected_close_date: datetime | None = None
     notes: str | None = Field(None, max_length=5000)
+    probability: float | None = Field(None, ge=0, le=100)
     tag_ids: list[UUID] = []
 
 
@@ -214,6 +225,7 @@ class DealRead(BaseModel):
     owner_id: UUID | None = None
     expected_close_date: datetime | None = None
     notes: str | None = None
+    probability: float | None = None
     tags: list[TagRead] = []
     created_at: datetime
     updated_at: datetime
@@ -231,6 +243,7 @@ class DealUpdate(BaseModel):
     owner_id: UUID | None = None
     expected_close_date: datetime | None = None
     notes: str | None = Field(None, max_length=5000)
+    probability: float | None = Field(None, ge=0, le=100)
     tag_ids: list[UUID] | None = None
 
 

@@ -61,6 +61,8 @@ async def lifespan(app: FastAPI):
                 # taskrecurrence enum may need creating first; create_all should handle it,
                 # but if the column add races on first boot just skip and let next boot fix.
                 pass
+        # Deal probability
+        await conn.execute(text("ALTER TABLE deals ADD COLUMN IF NOT EXISTS probability DOUBLE PRECISION"))
 
     # Seed default admin user if none exists
     async with async_session() as db:
