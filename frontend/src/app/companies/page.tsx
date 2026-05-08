@@ -11,7 +11,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { apiFetch, apiUpload } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Download, Upload, Trash2, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
+import { Plus, Search, Download, Upload, Trash2, ArrowUpDown, ChevronUp, ChevronDown, Building2 } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
+import { BulkActionBar } from "@/components/bulk-action-bar";
+import { SavedViewsPicker } from "@/components/saved-views-picker";
+import { ColumnPicker, useCustomFieldColumns } from "@/components/custom-field-columns";
 
 interface Company {
   id: string;
@@ -22,6 +26,7 @@ interface Company {
   phone: string | null;
   tags: Array<{ id: string; name: string; color: string }>;
   created_at: string;
+  custom_fields?: Array<{ field_id: string; value: string }>;
 }
 
 interface PaginatedCompanies {
@@ -43,6 +48,8 @@ export default function CompaniesPage() {
   const [industries, setIndustries] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ name: "", domain: "", industry: "", size: "", phone: "" });
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const cf = useCustomFieldColumns("company");
 
   const load = useCallback(() => {
     const params = new URLSearchParams({
@@ -53,8 +60,12 @@ export default function CompaniesPage() {
     });
     if (tagFilter) params.set("tag_id", tagFilter);
     if (industryFilter) params.set("industry", industryFilter);
+    if (cf.visible.length > 0) params.set("include_custom_fields", "true");
+    Object.entries(cf.filters).forEach(([fid, val]) => {
+      if (val) params.set(`cf_${fid}`, val);
+    });
     apiFetch<PaginatedCompanies>(`/api/companies?${params}`).then(setData);
-  }, [page, search, sortBy, sortDir, tagFilter, industryFilter]);
+  }, [page, search, sortBy, sortDir, tagFilter, industryFilter, cf.visible, cf.filters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -166,6 +177,29 @@ export default function CompaniesPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <SavedViewsPicker
+            entity="company"
+            currentFilters={{ search, sortBy, sortDir, tagFilter, industryFilter, cfVisible: cf.visible, cfFilters: cf.filters }}
+            onApply={(f) => {
+              if (typeof f.search === "string") setSearch(f.search);
+              if (typeof f.sortBy === "string") setSortBy(f.sortBy);
+              if (f.sortDir === "asc" || f.sortDir === "desc") setSortDir(f.sortDir);
+              if (typeof f.tagFilter === "string") setTagFilter(f.tagFilter);
+              if (typeof f.industryFilter === "string") setIndustryFilter(f.industryFilter);
+              if (Array.isArray(f.cfVisible)) cf.setVisible(f.cfVisible as string[]);
+              setPage(1);
+            }}
+          />
+          <ColumnPicker
+            entity="company"
+            visibleFieldIds={cf.visible}
+            filters={cf.filters}
+            onChangeVisibility={cf.setVisible}
+            onChangeFilter={cf.setFilter}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
           <Select value={tagFilter || "all"} onValueChange={(v) => { setTagFilter(v === "all" ? "" : v); setPage(1); }}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="All tags" />
@@ -190,12 +224,31 @@ export default function CompaniesPage() {
           </Select>
         </div>
 
+        <BulkActionBar
+          entity="companies"
+          selectedIds={selectedIds}
+          onClear={() => setSelectedIds([])}
+          onApplied={load}
+          actions={["add_tag", "remove_tag", "delete"]}
+        />
+
         <Card>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[600px]">
               <thead>
                 <tr className="border-b text-left text-sm text-muted-foreground">
+                  <th className="p-4 w-10">
+                    <input
+                      type="checkbox"
+                      checked={!!data && data.items.length > 0 && data.items.every((c) => selectedIds.includes(c.id))}
+                      onChange={(e) => {
+                        if (!data) return;
+                        if (e.target.checked) setSelectedIds(Array.from(new Set([...selectedIds, ...data.items.map((c) => c.id)])));
+                        else setSelectedIds(selectedIds.filter((id) => !data.items.some((c) => c.id === id)));
+                      }}
+                    />
+                  </th>
                   <th className="p-4">
                     <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("name")}>
                       Name
@@ -216,12 +269,38 @@ export default function CompaniesPage() {
                   </th>
                   <th className="p-4">Size</th>
                   <th className="p-4">Tags</th>
+                  {cf.visible.map((fid) => {
+                    const def = cf.definitions.find((d) => d.id === fid);
+                    return (
+                      <th key={fid} className="p-4">
+                        <div className="flex flex-col gap-1">
+                          <span>{def?.name || "Custom"}</span>
+                          <Input
+                            placeholder="Filter…"
+                            className="h-7 text-xs"
+                            value={cf.filters[fid] || ""}
+                            onChange={(e) => { cf.setFilter(fid, e.target.value); setPage(1); }}
+                          />
+                        </div>
+                      </th>
+                    );
+                  })}
                   <th className="p-4 w-16"></th>
                 </tr>
               </thead>
               <tbody>
                 {data?.items.map((c) => (
                   <tr key={c.id} className="border-b hover:bg-muted/50">
+                    <td className="p-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(c.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedIds([...selectedIds, c.id]);
+                          else setSelectedIds(selectedIds.filter((id) => id !== c.id));
+                        }}
+                      />
+                    </td>
                     <td className="p-4 font-medium"><Link href={`/companies/${c.id}`} className="text-primary hover:underline">{c.name}</Link></td>
                     <td className="p-4 text-sm">{c.domain || "-"}</td>
                     <td className="p-4 text-sm">{c.industry || "-"}</td>
@@ -233,13 +312,23 @@ export default function CompaniesPage() {
                         ))}
                       </div>
                     </td>
+                    {cf.visible.map((fid) => {
+                      const v = c.custom_fields?.find((x) => x.field_id === fid);
+                      return <td key={fid} className="p-4 text-sm">{v?.value || "-"}</td>;
+                    })}
                     <td className="p-4">
                       <Button variant="ghost" size="icon" onClick={() => handleDelete(c.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                     </td>
                   </tr>
                 ))}
                 {data?.items.length === 0 && (
-                  <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No companies found</td></tr>
+                  <tr><td colSpan={7 + cf.visible.length} className="p-0">
+                    <EmptyState
+                      icon={Building2}
+                      title={search || tagFilter || industryFilter ? "No companies match your filters" : "No companies yet"}
+                      description={search || tagFilter || industryFilter ? "Try clearing filters or adjusting your search." : "Click Add Company to get started."}
+                    />
+                  </td></tr>
                 )}
               </tbody>
             </table>

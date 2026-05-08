@@ -53,6 +53,20 @@ class TaskStatus(str, enum.Enum):
     DONE = "done"
 
 
+class TaskRecurrence(str, enum.Enum):
+    NONE = "none"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
+class TaskPriority(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
 class EmailDirection(str, enum.Enum):
     INBOUND = "inbound"
     OUTBOUND = "outbound"
@@ -92,6 +106,13 @@ class APIKeyScope(str, enum.Enum):
     TAGS_WRITE = "tags:write"
     SEARCH_READ = "search:read"
     DASHBOARD_READ = "dashboard:read"
+    EMAIL_READ = "email:read"
+    EMAIL_WRITE = "email:write"
+    NOTIFICATIONS_READ = "notifications:read"
+    NOTIFICATIONS_WRITE = "notifications:write"
+    CUSTOM_FIELDS_READ = "custom_fields:read"
+    CUSTOM_FIELDS_WRITE = "custom_fields:write"
+    AUDIT_READ = "audit:read"
     AGENT_BULK_UPLOAD = "agent:bulk_upload"
     AGENT_RESEARCH = "agent:research"
     ALL = "*"
@@ -156,6 +177,7 @@ class Contact(Base):
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     source = Column(String(100))
     notes = Column(Text)
+    address = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -203,6 +225,7 @@ class Deal(Base):
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     expected_close_date = Column(DateTime(timezone=True))
     notes = Column(Text)
+    probability = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -212,6 +235,7 @@ class Deal(Base):
     tags = relationship("Tag", secondary=deal_tags, back_populates="deals")
     activities = relationship("Activity", back_populates="deal")
     tasks = relationship("Task", back_populates="deal")
+    custom_field_values = relationship("CustomFieldValue", back_populates="deal")
 
 
 class Activity(Base):
@@ -243,6 +267,10 @@ class Task(Base):
     assigned_to = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contact_id = Column(UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
     deal_id = Column(UUID(as_uuid=True), ForeignKey("deals.id", ondelete="SET NULL"), nullable=True)
+    reminder_minutes_before = Column(Integer, nullable=True)
+    recurrence_rule = Column(SAEnum(TaskRecurrence), nullable=False, default=TaskRecurrence.NONE)
+    parent_task_id = Column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    priority = Column(SAEnum(TaskPriority), nullable=False, default=TaskPriority.MEDIUM)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -336,9 +364,12 @@ class CustomFieldDefinition(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False)
     field_type = Column(SAEnum(CustomFieldType), nullable=False)
-    entity_type = Column(String(50), nullable=False)  # "contact" or "company"
-    options = Column(Text)  # JSON string for select options
+    entity_type = Column(String(50), nullable=False)  # "contact", "company", "deal"
+    options = Column(Text)  # JSON array for select options
     is_required = Column(Boolean, default=False)
+    validation_rule = Column(Text, nullable=True)  # JSON: {regex, min, max}
+    default_value = Column(Text, nullable=True)
+    display_order = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -349,11 +380,13 @@ class CustomFieldValue(Base):
     field_id = Column(UUID(as_uuid=True), ForeignKey("custom_field_definitions.id", ondelete="CASCADE"), nullable=False)
     contact_id = Column(UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="CASCADE"), nullable=True)
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=True)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("deals.id", ondelete="CASCADE"), nullable=True)
     value = Column(Text)
 
     field = relationship("CustomFieldDefinition")
     contact = relationship("Contact", back_populates="custom_field_values")
     company = relationship("Company", back_populates="custom_field_values")
+    deal = relationship("Deal", back_populates="custom_field_values")
 
 
 # --- Audit ---
@@ -370,6 +403,21 @@ class AuditEventType(str, enum.Enum):
     API_KEY_REVOKED = "api_key_revoked"
     BULK_IMPORT = "bulk_import"
     AGENT_RESEARCH = "agent_research"
+    CONTACT_CREATED = "contact_created"
+    CONTACT_UPDATED = "contact_updated"
+    CONTACT_DELETED = "contact_deleted"
+    COMPANY_CREATED = "company_created"
+    COMPANY_UPDATED = "company_updated"
+    COMPANY_DELETED = "company_deleted"
+    DEAL_CREATED = "deal_created"
+    DEAL_UPDATED = "deal_updated"
+    DEAL_DELETED = "deal_deleted"
+    DEAL_STAGE_CHANGED = "deal_stage_changed"
+    TASK_CREATED = "task_created"
+    TASK_UPDATED = "task_updated"
+    TASK_DELETED = "task_deleted"
+    ACTIVITY_CREATED = "activity_created"
+    ACTIVITY_DELETED = "activity_deleted"
 
 
 class AuditLog(Base):
@@ -383,7 +431,28 @@ class AuditLog(Base):
     ip_address = Column(String(45), nullable=True)
     detail = Column(Text, nullable=True)
     api_key_id = Column(UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True)
+    entity_type = Column(String(50), nullable=True, index=True)
+    entity_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    before_state = Column(Text, nullable=True)
+    after_state = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# --- Saved Views ---
+
+class SavedView(Base):
+    __tablename__ = "saved_views"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_type = Column(String(50), nullable=False, index=True)  # contact / company / deal / task
+    name = Column(String(255), nullable=False)
+    filters = Column(Text, nullable=False)  # JSON string of filter state
+    is_shared = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User")
 
 
 # --- Notifications ---

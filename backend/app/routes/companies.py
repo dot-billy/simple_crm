@@ -2,15 +2,16 @@ import csv
 import io
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.audit import log_mutation
 from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
-from app.models import Activity, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, User, UserRole, company_tags
-from app.schemas import CompanyCreate, CompanyProfile, CompanyRead, CompanyStats, CompanyUpdate, ContactRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead
+from app.models import Activity, AuditEventType, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, User, UserRole, company_tags
+from app.schemas import BulkAction, CompanyCreate, CompanyProfile, CompanyRead, CompanyStats, CompanyUpdate, ContactRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead
 
 router = APIRouter(prefix="/api/companies", tags=["companies"])
 
@@ -31,6 +32,7 @@ def _apply_ownership_filter(query, user: User):
 
 @router.get("", response_model=dict)
 async def list_companies(
+    request: Request,
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=100),
     search: str = Query(""),
@@ -38,6 +40,7 @@ async def list_companies(
     sort_dir: str = Query("desc"),
     tag_id: str = Query(""),
     industry: str = Query(""),
+    include_custom_fields: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_scope("companies:read")),
 ):
@@ -51,6 +54,17 @@ async def list_companies(
         query = query.join(company_tags).where(company_tags.c.tag_id == tag_id)
     if industry:
         query = query.where(Company.industry == industry)
+    cf_filters = {k[3:]: v for k, v in request.query_params.items() if k.startswith("cf_") and v}
+    for field_id, val in cf_filters.items():
+        try:
+            fid = UUID(field_id)
+        except ValueError:
+            continue
+        sub = (
+            select(CustomFieldValue.company_id)
+            .where(CustomFieldValue.field_id == fid, CustomFieldValue.value.ilike(f"%{val}%"))
+        )
+        query = query.where(Company.id.in_(sub))
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar() or 0
     col = SORTABLE_COLUMNS.get(sort_by, Company.created_at)
@@ -58,8 +72,19 @@ async def list_companies(
     query = query.order_by(order).offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
     items = result.scalars().all()
+    items_data = [CompanyRead.model_validate(c).model_dump(mode="json") for c in items]
+    if include_custom_fields and items:
+        ids = [c.id for c in items]
+        cfvs = (await db.execute(select(CustomFieldValue).where(CustomFieldValue.company_id.in_(ids)))).scalars().all()
+        by_company: dict = {}
+        for v in cfvs:
+            by_company.setdefault(str(v.company_id), []).append({
+                "field_id": str(v.field_id), "value": v.value,
+            })
+        for d in items_data:
+            d["custom_fields"] = by_company.get(d["id"], [])
     return {
-        "items": [CompanyRead.model_validate(c) for c in items],
+        "items": items_data,
         "total": total, "page": page, "per_page": per_page,
         "pages": (total + per_page - 1) // per_page if per_page else 0,
     }
@@ -95,9 +120,11 @@ async def create_company(data: CompanyCreate, db: AsyncSession = Depends(get_db)
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         company.tags = list(tags)
     db.add(company)
+    await db.flush()
+    log_mutation(db, event_type=AuditEventType.COMPANY_CREATED, user=current_user, entity_type="company", entity_id=company.id, after=company)
     await db.commit()
-    await db.refresh(company, ["tags"])
-    return company
+    refreshed = await db.execute(select(Company).options(selectinload(Company.tags)).where(Company.id == company.id))
+    return refreshed.scalar_one()
 
 
 @router.patch("/{company_id}", response_model=CompanyRead)
@@ -108,14 +135,16 @@ async def update_company(company_id: UUID, data: CompanyUpdate, db: AsyncSession
     company = result.scalar_one_or_none()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
+    before_snapshot = {c.name: getattr(company, c.name) for c in company.__table__.columns}
     for field, value in data.model_dump(exclude_unset=True, exclude={"tag_ids"}).items():
         setattr(company, field, value)
     if data.tag_ids is not None:
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         company.tags = list(tags)
+    log_mutation(db, event_type=AuditEventType.COMPANY_UPDATED, user=current_user, entity_type="company", entity_id=company.id, before=before_snapshot, after=company)
     await db.commit()
-    await db.refresh(company, ["tags"])
-    return company
+    refreshed = await db.execute(select(Company).options(selectinload(Company.tags)).where(Company.id == company.id))
+    return refreshed.scalar_one()
 
 
 @router.delete("/{company_id}")
@@ -126,9 +155,43 @@ async def delete_company(company_id: UUID, db: AsyncSession = Depends(get_db), c
     company = result.scalar_one_or_none()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
+    before_snapshot = {c.name: getattr(company, c.name) for c in company.__table__.columns}
+    company_id_copy = company.id
     await db.delete(company)
+    log_mutation(db, event_type=AuditEventType.COMPANY_DELETED, user=current_user, entity_type="company", entity_id=company_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/bulk")
+async def bulk_companies(
+    data: BulkAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("companies:write")),
+):
+    query = select(Company).options(selectinload(Company.tags)).where(Company.id.in_(data.ids))
+    query = _apply_ownership_filter(query, current_user)
+    companies = (await db.execute(query)).scalars().all()
+    affected = 0
+    for c in companies:
+        before = {col.name: getattr(c, col.name) for col in c.__table__.columns}
+        if data.action == "delete":
+            cid = c.id
+            await db.delete(c)
+            log_mutation(db, event_type=AuditEventType.COMPANY_DELETED, user=current_user, entity_type="company", entity_id=cid, before=before)
+        elif data.action == "add_tag" and data.tag_id:
+            tag = (await db.execute(select(Tag).where(Tag.id == data.tag_id))).scalar_one_or_none()
+            if tag and tag not in c.tags:
+                c.tags.append(tag)
+                log_mutation(db, event_type=AuditEventType.COMPANY_UPDATED, user=current_user, entity_type="company", entity_id=c.id, before=before, after=c)
+        elif data.action == "remove_tag" and data.tag_id:
+            c.tags = [t for t in c.tags if t.id != data.tag_id]
+            log_mutation(db, event_type=AuditEventType.COMPANY_UPDATED, user=current_user, entity_type="company", entity_id=c.id, before=before, after=c)
+        else:
+            continue
+        affected += 1
+    await db.commit()
+    return {"affected": affected}
 
 
 @router.get("/{company_id}/profile", response_model=CompanyProfile)

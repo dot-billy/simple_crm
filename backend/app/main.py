@@ -14,8 +14,9 @@ from app.auth import hash_password
 from app.config import settings
 from app.database import engine, async_session, Base
 from app.gmail_sync_worker import gmail_sync_loop
+from app.notification_worker import notification_worker_loop
 from app.models import User, UserRole
-from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email, search, notifications, api_keys, service_accounts, agent
+from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email, search, notifications, api_keys, service_accounts, agent, audit, saved_views
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -27,6 +28,55 @@ async def lifespan(app: FastAPI):
     # Create tables on startup
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Stopgap mini-migrations until Alembic is added.
+        # Idempotent: ADD VALUE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS.
+        from sqlalchemy import text
+        new_enum_values = [
+            "CONTACT_CREATED", "CONTACT_UPDATED", "CONTACT_DELETED",
+            "COMPANY_CREATED", "COMPANY_UPDATED", "COMPANY_DELETED",
+            "DEAL_CREATED", "DEAL_UPDATED", "DEAL_DELETED", "DEAL_STAGE_CHANGED",
+            "TASK_CREATED", "TASK_UPDATED", "TASK_DELETED",
+            "ACTIVITY_CREATED", "ACTIVITY_DELETED",
+        ]
+        for v in new_enum_values:
+            await conn.execute(text(f"ALTER TYPE auditeventtype ADD VALUE IF NOT EXISTS '{v}'"))
+        for col_def in [
+            "ADD COLUMN IF NOT EXISTS entity_type VARCHAR(50)",
+            "ADD COLUMN IF NOT EXISTS entity_id UUID",
+            "ADD COLUMN IF NOT EXISTS before_state TEXT",
+            "ADD COLUMN IF NOT EXISTS after_state TEXT",
+        ]:
+            await conn.execute(text(f"ALTER TABLE audit_log {col_def}"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_log_entity_type ON audit_log(entity_type)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_log_entity_id ON audit_log(entity_id)"))
+        # Task reminders / recurrence
+        for col_def in [
+            "ADD COLUMN IF NOT EXISTS reminder_minutes_before INTEGER",
+            "ADD COLUMN IF NOT EXISTS recurrence_rule taskrecurrence NOT NULL DEFAULT 'NONE'",
+            "ADD COLUMN IF NOT EXISTS parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL",
+        ]:
+            try:
+                await conn.execute(text(f"ALTER TABLE tasks {col_def}"))
+            except Exception:
+                # taskrecurrence enum may need creating first; create_all should handle it,
+                # but if the column add races on first boot just skip and let next boot fix.
+                pass
+        # Deal probability
+        await conn.execute(text("ALTER TABLE deals ADD COLUMN IF NOT EXISTS probability DOUBLE PRECISION"))
+        # Custom field enhancements
+        for col_def in [
+            "ADD COLUMN IF NOT EXISTS validation_rule TEXT",
+            "ADD COLUMN IF NOT EXISTS default_value TEXT",
+            "ADD COLUMN IF NOT EXISTS display_order INTEGER NOT NULL DEFAULT 0",
+        ]:
+            await conn.execute(text(f"ALTER TABLE custom_field_definitions {col_def}"))
+        await conn.execute(text("ALTER TABLE custom_field_values ADD COLUMN IF NOT EXISTS deal_id UUID REFERENCES deals(id) ON DELETE CASCADE"))
+        # Task priority + Contact address (SCRM-18)
+        try:
+            await conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS priority taskpriority NOT NULL DEFAULT 'MEDIUM'"))
+        except Exception:
+            pass
+        await conn.execute(text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS address TEXT"))
 
     # Seed default admin user if none exists
     async with async_session() as db:
@@ -48,10 +98,13 @@ async def lifespan(app: FastAPI):
 
     # Start background Gmail sync worker
     sync_task = asyncio.create_task(gmail_sync_loop())
+    # Start background notification worker (due-soon task scans)
+    notif_task = asyncio.create_task(notification_worker_loop())
 
     yield
 
     sync_task.cancel()
+    notif_task.cancel()
     await engine.dispose()
 
 
@@ -104,6 +157,8 @@ app.include_router(notifications.router)
 app.include_router(api_keys.router)
 app.include_router(service_accounts.router)
 app.include_router(agent.router)
+app.include_router(audit.router)
+app.include_router(saved_views.router)
 
 
 @app.get("/api/health")

@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user, require_role
+from app.auth import require_scope
 from app.config import settings
 from app.database import get_db
 from app.gmail_service import send_email, sync_user_gmail, verify_tracking_signature
@@ -41,6 +41,25 @@ from app.schemas import (
 
 router = APIRouter(prefix="/api/email", tags=["email"])
 limiter = Limiter(key_func=get_remote_address)
+
+
+# Per-user send rate limit: in-memory sliding 1-hour window keyed by user id.
+import time as _time
+from collections import deque as _deque
+_USER_SEND_LOG: dict[str, _deque] = {}
+SEND_RATE_LIMIT_PER_HOUR = 30
+
+
+def _check_send_rate(user: User) -> None:
+    key = str(user.id)
+    now = _time.monotonic()
+    window_start = now - 3600.0
+    log = _USER_SEND_LOG.setdefault(key, _deque())
+    while log and log[0] < window_start:
+        log.popleft()
+    if len(log) >= SEND_RATE_LIMIT_PER_HOUR:
+        raise HTTPException(status_code=429, detail=f"Send rate limit exceeded ({SEND_RATE_LIMIT_PER_HOUR}/hr)")
+    log.append(now)
 
 # Transparent 1x1 GIF pixel
 TRACKING_PIXEL = base64.b64decode(
@@ -86,9 +105,23 @@ def _substitute_variables(
 
 @router.get("/template-variables")
 async def get_template_variables(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     return TEMPLATE_VARIABLES
+
+
+@router.get("/config-status")
+async def get_config_status(
+    current_user: User = Depends(require_scope("email:read")),
+):
+    """Tell the UI whether Gmail integration is actually wired up."""
+    import os
+    configured = bool(settings.GOOGLE_SERVICE_ACCOUNT_FILE) and os.path.isfile(settings.GOOGLE_SERVICE_ACCOUNT_FILE or "")
+    return {
+        "configured": configured,
+        "credentials_path_set": bool(settings.GOOGLE_SERVICE_ACCOUNT_FILE),
+        "send_rate_limit_per_hour": SEND_RATE_LIMIT_PER_HOUR,
+    }
 
 
 # --- Sync ---
@@ -96,7 +129,7 @@ async def get_template_variables(
 @router.get("/sync/status", response_model=GmailSyncStatus)
 async def get_sync_status(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     is_configured = bool(settings.GOOGLE_SERVICE_ACCOUNT_FILE)
     result = await db.execute(
@@ -114,7 +147,7 @@ async def get_sync_status(
 @router.post("/sync/trigger")
 async def trigger_sync(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     if not settings.GOOGLE_SERVICE_ACCOUNT_FILE:
         raise HTTPException(status_code=400, detail="Gmail integration not configured")
@@ -133,7 +166,7 @@ async def list_emails(
     direction: str = Query(""),
     search: str = Query(""),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     query = select(EmailMessage)
     if current_user.role == UserRole.USER:
@@ -172,7 +205,7 @@ async def list_emails(
 async def get_email(
     email_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     query = select(EmailMessage).where(EmailMessage.id == email_id)
     if current_user.role == UserRole.USER:
@@ -188,10 +221,11 @@ async def get_email(
 async def send(
     data: EmailSendRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     if not settings.GOOGLE_SERVICE_ACCOUNT_FILE:
         raise HTTPException(status_code=400, detail="Gmail integration not configured")
+    _check_send_rate(current_user)
 
     # Load related entities for template variable substitution
     contact = None
@@ -239,7 +273,7 @@ async def link_email_to_entity(
     contact_id: UUID | None = None,
     deal_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     query = select(EmailMessage).where(EmailMessage.id == email_id)
     if current_user.role == UserRole.USER:
@@ -338,7 +372,7 @@ async def track_click(
 async def get_tracking_events(
     email_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     result = await db.execute(
         select(EmailTrackingEvent)
@@ -351,7 +385,7 @@ async def get_tracking_events(
 @router.get("/tracking/stats", response_model=EmailTrackingStats)
 async def get_tracking_stats(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     # Count outbound emails with tracking
     sent_q = select(func.count()).select_from(EmailMessage).where(
@@ -386,7 +420,7 @@ async def get_tracking_stats(
 @router.get("/templates", response_model=list[EmailTemplateRead])
 async def list_templates(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:read")),
 ):
     query = select(EmailTemplate)
     if current_user.role == UserRole.USER:
@@ -401,7 +435,7 @@ async def list_templates(
 async def create_template(
     data: EmailTemplateCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     template = EmailTemplate(**data.model_dump(), created_by=current_user.id)
     db.add(template)
@@ -415,7 +449,7 @@ async def update_template(
     template_id: UUID,
     data: EmailTemplateUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     result = await db.execute(select(EmailTemplate).where(EmailTemplate.id == template_id))
     template = result.scalar_one_or_none()
@@ -434,7 +468,7 @@ async def update_template(
 async def delete_template(
     template_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("email:write")),
 ):
     result = await db.execute(select(EmailTemplate).where(EmailTemplate.id == template_id))
     template = result.scalar_one_or_none()
@@ -445,3 +479,30 @@ async def delete_template(
     await db.delete(template)
     await db.commit()
     return {"ok": True}
+
+
+class _SampleObj:
+    """Light object that mimics getattr for template substitution."""
+    def __init__(self, attrs: dict):
+        for k, v in attrs.items():
+            setattr(self, k, v)
+
+
+@router.get("/templates/{template_id}/preview")
+async def preview_template(
+    template_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("email:read")),
+):
+    template = (await db.execute(select(EmailTemplate).where(EmailTemplate.id == template_id))).scalar_one_or_none()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    sample_contact = _SampleObj({"first_name": "Jane", "last_name": "Doe", "email": "jane@example.com", "phone": "+1 555 0100", "job_title": "VP Engineering"})
+    sample_company = _SampleObj({"name": "Acme Inc.", "domain": "acme.com", "industry": "SaaS", "size": "50-100"})
+    sample_deal = _SampleObj({"title": "Acme Annual Contract", "value": 25000, "currency": "USD", "stage": "proposal"})
+
+    return {
+        "subject": _substitute_variables(template.subject or "", contact=sample_contact, deal=sample_deal, company=sample_company, user=current_user),
+        "body_html": _substitute_variables(template.body_html or "", contact=sample_contact, deal=sample_deal, company=sample_company, user=current_user),
+    }

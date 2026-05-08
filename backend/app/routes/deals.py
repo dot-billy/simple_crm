@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -8,10 +8,26 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.audit import log_mutation
 from app.auth import get_current_user, require_role, require_scope
 from app.database import get_db
-from app.models import Activity, ActivityType, Deal, DealStage, Tag, User, UserRole
-from app.schemas import DealCreate, DealRead, DealStageUpdate, DealUpdate
+from app.models import Activity, ActivityType, AuditEventType, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole
+from app.routes.notifications import add_notification
+from app.schemas import (
+    ActivityRead,
+    BulkAction,
+    CompanyRead,
+    ContactRead,
+    CustomFieldDefinitionRead,
+    CustomFieldValueRead,
+    DealCreate,
+    DealProfile,
+    DealRead,
+    DealStageUpdate,
+    DealStats,
+    DealUpdate,
+    TaskRead,
+)
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
 
@@ -67,6 +83,8 @@ async def create_deal(data: DealCreate, db: AsyncSession = Depends(get_db), curr
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         deal.tags = list(tags)
     db.add(deal)
+    await db.flush()
+    log_mutation(db, event_type=AuditEventType.DEAL_CREATED, user=current_user, entity_type="deal", entity_id=deal.id, after=deal)
     await db.commit()
     await db.refresh(deal, ["tags"])
     return deal
@@ -80,14 +98,30 @@ async def update_deal(deal_id: UUID, data: DealUpdate, db: AsyncSession = Depend
     deal = result.scalar_one_or_none()
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
+    before_snapshot = {c.name: getattr(deal, c.name) for c in deal.__table__.columns}
+    old_owner_id = deal.owner_id
     for field, value in data.model_dump(exclude_unset=True, exclude={"tag_ids"}).items():
         setattr(deal, field, value)
     if data.tag_ids is not None:
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         deal.tags = list(tags)
+    log_mutation(db, event_type=AuditEventType.DEAL_UPDATED, user=current_user, entity_type="deal", entity_id=deal.id, before=before_snapshot, after=deal)
+    if (
+        deal.owner_id
+        and deal.owner_id != old_owner_id
+        and deal.owner_id != current_user.id
+    ):
+        add_notification(
+            db,
+            user_id=deal.owner_id,
+            title=f"Deal assigned to you: {deal.title}",
+            message=f"{current_user.full_name or current_user.email} assigned this deal to you.",
+            entity_type="deal",
+            entity_id=deal.id,
+        )
     await db.commit()
-    await db.refresh(deal, ["tags"])
-    return deal
+    refreshed = await db.execute(select(Deal).options(selectinload(Deal.tags)).where(Deal.id == deal.id))
+    return refreshed.scalar_one()
 
 
 @router.delete("/{deal_id}")
@@ -98,7 +132,10 @@ async def delete_deal(deal_id: UUID, db: AsyncSession = Depends(get_db), current
     deal = result.scalar_one_or_none()
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
+    before_snapshot = {c.name: getattr(deal, c.name) for c in deal.__table__.columns}
+    deal_id_copy = deal.id
     await db.delete(deal)
+    log_mutation(db, event_type=AuditEventType.DEAL_DELETED, user=current_user, entity_type="deal", entity_id=deal_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}
 
@@ -116,6 +153,7 @@ async def update_deal_stage(
     deal = result.scalar_one_or_none()
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
+    old_stage = deal.stage
     deal.stage = data.stage
     activity = Activity(
         type=ActivityType.NOTE,
@@ -124,9 +162,142 @@ async def update_deal_stage(
         created_by=current_user.id,
     )
     db.add(activity)
+    if old_stage != data.stage:
+        log_mutation(
+            db,
+            event_type=AuditEventType.DEAL_STAGE_CHANGED,
+            user=current_user,
+            entity_type="deal",
+            entity_id=deal.id,
+            before={"stage": old_stage.value},
+            after={"stage": data.stage.value},
+        )
+    if deal.owner_id and deal.owner_id != current_user.id and old_stage != data.stage:
+        if data.stage == DealStage.CLOSED_WON:
+            title = f"Deal won: {deal.title}"
+        elif data.stage == DealStage.CLOSED_LOST:
+            title = f"Deal lost: {deal.title}"
+        else:
+            title = f"Deal stage changed: {deal.title}"
+        add_notification(
+            db,
+            user_id=deal.owner_id,
+            title=title,
+            message=f"{current_user.full_name or current_user.email} moved this deal from {old_stage.value} to {data.stage.value}.",
+            entity_type="deal",
+            entity_id=deal.id,
+        )
     await db.commit()
-    await db.refresh(deal, ["tags"])
-    return deal
+    refreshed = await db.execute(select(Deal).options(selectinload(Deal.tags)).where(Deal.id == deal.id))
+    return refreshed.scalar_one()
+
+
+@router.get("/{deal_id}/profile", response_model=DealProfile)
+async def get_deal_profile(
+    deal_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("deals:read")),
+):
+    query = (
+        select(Deal)
+        .options(
+            selectinload(Deal.tags),
+            selectinload(Deal.contact).selectinload(Contact.tags),
+            selectinload(Deal.company).selectinload(Company.tags),
+            selectinload(Deal.tasks),
+            selectinload(Deal.custom_field_values),
+        )
+        .where(Deal.id == deal_id)
+    )
+    query = _apply_ownership_filter(query, current_user)
+    deal = (await db.execute(query)).scalar_one_or_none()
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+
+    activities = (
+        await db.execute(
+            select(Activity)
+            .where(Activity.deal_id == deal_id)
+            .order_by(Activity.activity_date.desc())
+        )
+    ).scalars().all()
+
+    tasks = deal.tasks or []
+    last_act_date = activities[0].activity_date if activities else None
+
+    now = datetime.now(timezone.utc)
+    days_open = (now - deal.created_at).days if deal.created_at else 0
+    last_stage_change = next(
+        (a.activity_date for a in activities if a.subject and a.subject.startswith("Deal moved to")),
+        None,
+    )
+    days_in_stage = (now - last_stage_change).days if last_stage_change else days_open
+
+    stats = DealStats(
+        total_activities=len(activities),
+        total_tasks=len(tasks),
+        open_tasks=sum(1 for t in tasks if t.status != TaskStatus.DONE),
+        days_in_stage=days_in_stage,
+        days_open=days_open,
+        last_activity_date=last_act_date,
+    )
+
+    defs = (
+        await db.execute(
+            select(CustomFieldDefinition)
+            .where(CustomFieldDefinition.entity_type == "deal")
+            .order_by(CustomFieldDefinition.display_order, CustomFieldDefinition.name)
+        )
+    ).scalars().all()
+
+    return DealProfile(
+        deal=DealRead.model_validate(deal),
+        contact=ContactRead.model_validate(deal.contact) if deal.contact else None,
+        company=CompanyRead.model_validate(deal.company) if deal.company else None,
+        activities=[ActivityRead.model_validate(a) for a in activities],
+        tasks=[TaskRead.model_validate(t) for t in tasks],
+        custom_fields=[CustomFieldValueRead.model_validate(v) for v in (deal.custom_field_values or [])],
+        custom_field_definitions=[CustomFieldDefinitionRead.model_validate(d) for d in defs],
+        stats=stats,
+    )
+
+
+@router.post("/bulk")
+async def bulk_deals(
+    data: BulkAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("deals:write")),
+):
+    query = select(Deal).options(selectinload(Deal.tags)).where(Deal.id.in_(data.ids))
+    query = _apply_ownership_filter(query, current_user)
+    deals = (await db.execute(query)).scalars().all()
+    affected = 0
+    for d in deals:
+        before = {col.name: getattr(d, col.name) for col in d.__table__.columns}
+        if data.action == "delete":
+            did = d.id
+            await db.delete(d)
+            log_mutation(db, event_type=AuditEventType.DEAL_DELETED, user=current_user, entity_type="deal", entity_id=did, before=before)
+        elif data.action == "add_tag" and data.tag_id:
+            tag = (await db.execute(select(Tag).where(Tag.id == data.tag_id))).scalar_one_or_none()
+            if tag and tag not in d.tags:
+                d.tags.append(tag)
+                log_mutation(db, event_type=AuditEventType.DEAL_UPDATED, user=current_user, entity_type="deal", entity_id=d.id, before=before, after=d)
+        elif data.action == "remove_tag" and data.tag_id:
+            d.tags = [t for t in d.tags if t.id != data.tag_id]
+            log_mutation(db, event_type=AuditEventType.DEAL_UPDATED, user=current_user, entity_type="deal", entity_id=d.id, before=before, after=d)
+        elif data.action == "set_owner":
+            d.owner_id = data.owner_id
+            log_mutation(db, event_type=AuditEventType.DEAL_UPDATED, user=current_user, entity_type="deal", entity_id=d.id, before=before, after=d)
+        elif data.action == "set_stage" and data.stage:
+            old = d.stage
+            d.stage = data.stage
+            log_mutation(db, event_type=AuditEventType.DEAL_STAGE_CHANGED, user=current_user, entity_type="deal", entity_id=d.id, before={"stage": old.value}, after={"stage": data.stage.value})
+        else:
+            continue
+        affected += 1
+    await db.commit()
+    return {"affected": affected}
 
 
 def _sanitize_csv_value(val: str | None) -> str | None:

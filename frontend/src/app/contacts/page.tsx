@@ -11,8 +11,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { apiFetch, apiUpload } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Download, Upload, Trash2, Clock, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
+import { Plus, Search, Download, Upload, Trash2, Clock, ArrowUpDown, ChevronUp, ChevronDown, Users } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
 import { Timeline } from "@/components/timeline";
+import { BulkActionBar } from "@/components/bulk-action-bar";
+import { SavedViewsPicker } from "@/components/saved-views-picker";
+import { ColumnPicker, useCustomFieldColumns } from "@/components/custom-field-columns";
 
 interface Contact {
   id: string;
@@ -25,6 +29,7 @@ interface Contact {
   source: string | null;
   tags: Array<{ id: string; name: string; color: string }>;
   created_at: string;
+  custom_fields?: Array<{ field_id: string; value: string }>;
 }
 
 interface PaginatedContacts {
@@ -46,6 +51,8 @@ export default function ContactsPage() {
   const [sources, setSources] = useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [timelineContactId, setTimelineContactId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const cf = useCustomFieldColumns("contact");
   const [form, setForm] = useState({ first_name: "", last_name: "", email: "", phone: "", job_title: "", source: "" });
 
   const load = useCallback(() => {
@@ -57,8 +64,12 @@ export default function ContactsPage() {
     });
     if (tagFilter) params.set("tag_id", tagFilter);
     if (sourceFilter) params.set("source", sourceFilter);
+    if (cf.visible.length > 0) params.set("include_custom_fields", "true");
+    Object.entries(cf.filters).forEach(([fid, val]) => {
+      if (val) params.set(`cf_${fid}`, val);
+    });
     apiFetch<PaginatedContacts>(`/api/contacts?${params}`).then(setData);
-  }, [page, search, sortBy, sortDir, tagFilter, sourceFilter]);
+  }, [page, search, sortBy, sortDir, tagFilter, sourceFilter, cf.visible, cf.filters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -181,6 +192,29 @@ export default function ContactsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <SavedViewsPicker
+            entity="contact"
+            currentFilters={{ search, sortBy, sortDir, tagFilter, sourceFilter, cfVisible: cf.visible, cfFilters: cf.filters }}
+            onApply={(f) => {
+              if (typeof f.search === "string") setSearch(f.search);
+              if (typeof f.sortBy === "string") setSortBy(f.sortBy);
+              if (f.sortDir === "asc" || f.sortDir === "desc") setSortDir(f.sortDir);
+              if (typeof f.tagFilter === "string") setTagFilter(f.tagFilter);
+              if (typeof f.sourceFilter === "string") setSourceFilter(f.sourceFilter);
+              if (Array.isArray(f.cfVisible)) cf.setVisible(f.cfVisible as string[]);
+              setPage(1);
+            }}
+          />
+          <ColumnPicker
+            entity="contact"
+            visibleFieldIds={cf.visible}
+            filters={cf.filters}
+            onChangeVisibility={cf.setVisible}
+            onChangeFilter={cf.setFilter}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
           <Select value={tagFilter || "all"} onValueChange={(v) => { setTagFilter(v === "all" ? "" : v); setPage(1); }}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="All tags" />
@@ -205,12 +239,31 @@ export default function ContactsPage() {
           </Select>
         </div>
 
+        <BulkActionBar
+          entity="contacts"
+          selectedIds={selectedIds}
+          onClear={() => setSelectedIds([])}
+          onApplied={load}
+          actions={["add_tag", "remove_tag", "delete"]}
+        />
+
         <Card>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
             <table className="w-full min-w-[600px]">
               <thead>
                 <tr className="border-b text-left text-sm text-muted-foreground">
+                  <th className="p-4 w-10">
+                    <input
+                      type="checkbox"
+                      checked={!!data && data.items.length > 0 && data.items.every((c) => selectedIds.includes(c.id))}
+                      onChange={(e) => {
+                        if (!data) return;
+                        if (e.target.checked) setSelectedIds(Array.from(new Set([...selectedIds, ...data.items.map((c) => c.id)])));
+                        else setSelectedIds(selectedIds.filter((id) => !data.items.some((c) => c.id === id)));
+                      }}
+                    />
+                  </th>
                   <th className="p-4">
                     <button className="flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("last_name")}>
                       Name
@@ -231,12 +284,38 @@ export default function ContactsPage() {
                     </button>
                   </th>
                   <th className="p-4">Tags</th>
+                  {cf.visible.map((fid) => {
+                    const def = cf.definitions.find((d) => d.id === fid);
+                    return (
+                      <th key={fid} className="p-4">
+                        <div className="flex flex-col gap-1">
+                          <span>{def?.name || "Custom"}</span>
+                          <Input
+                            placeholder="Filter…"
+                            className="h-7 text-xs"
+                            value={cf.filters[fid] || ""}
+                            onChange={(e) => { cf.setFilter(fid, e.target.value); setPage(1); }}
+                          />
+                        </div>
+                      </th>
+                    );
+                  })}
                   <th className="p-4 w-24"></th>
                 </tr>
               </thead>
               <tbody>
                 {data?.items.map((c) => (
                   <tr key={c.id} className="border-b hover:bg-muted/50">
+                    <td className="p-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(c.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedIds([...selectedIds, c.id]);
+                          else setSelectedIds(selectedIds.filter((id) => id !== c.id));
+                        }}
+                      />
+                    </td>
                     <td className="p-4 font-medium"><Link href={`/contacts/${c.id}`} className="text-primary hover:underline">{c.first_name} {c.last_name}</Link></td>
                     <td className="p-4 text-sm">{c.email || "-"}</td>
                     <td className="p-4 text-sm">{c.phone || "-"}</td>
@@ -250,6 +329,10 @@ export default function ContactsPage() {
                         ))}
                       </div>
                     </td>
+                    {cf.visible.map((fid) => {
+                      const v = c.custom_fields?.find((x) => x.field_id === fid);
+                      return <td key={fid} className="p-4 text-sm">{v?.value || "-"}</td>;
+                    })}
                     <td className="p-4">
                       <div className="flex items-center gap-1">
                         <Button variant="ghost" size="icon" onClick={() => setTimelineContactId(c.id)} title="Timeline">
@@ -263,7 +346,13 @@ export default function ContactsPage() {
                   </tr>
                 ))}
                 {data?.items.length === 0 && (
-                  <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No contacts found</td></tr>
+                  <tr><td colSpan={7 + cf.visible.length} className="p-0">
+                    <EmptyState
+                      icon={Users}
+                      title={search || tagFilter || sourceFilter ? "No contacts match your filters" : "No contacts yet"}
+                      description={search || tagFilter || sourceFilter ? "Try clearing filters or adjusting your search." : "Click Add Contact to get started."}
+                    />
+                  </td></tr>
                 )}
               </tbody>
             </table>

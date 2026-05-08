@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_scope
 from app.database import get_db
 from app.models import Notification, User
 from app.schemas import NotificationRead, PaginatedNotificationResponse
@@ -12,7 +12,7 @@ from app.schemas import NotificationRead, PaginatedNotificationResponse
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 
-async def create_notification(
+def add_notification(
     db: AsyncSession,
     user_id: UUID,
     title: str,
@@ -28,6 +28,18 @@ async def create_notification(
         entity_id=entity_id,
     )
     db.add(notification)
+    return notification
+
+
+async def create_notification(
+    db: AsyncSession,
+    user_id: UUID,
+    title: str,
+    message: str | None = None,
+    entity_type: str | None = None,
+    entity_id: UUID | None = None,
+) -> Notification:
+    notification = add_notification(db, user_id, title, message, entity_type, entity_id)
     await db.commit()
     await db.refresh(notification)
     return notification
@@ -38,7 +50,7 @@ async def list_notifications(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("notifications:read")),
 ):
     base_query = select(Notification).where(Notification.user_id == current_user.id)
 
@@ -73,7 +85,7 @@ async def list_notifications(
 async def mark_notification_read(
     notification_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("notifications:write")),
 ):
     result = await db.execute(
         select(Notification).where(
@@ -93,7 +105,7 @@ async def mark_notification_read(
 @router.post("/mark-all-read")
 async def mark_all_read(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("notifications:write")),
 ):
     await db.execute(
         update(Notification)
@@ -107,7 +119,7 @@ async def mark_all_read(
 @router.get("/unread-count")
 async def unread_count(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_scope("notifications:read")),
 ):
     result = await db.execute(
         select(func.count()).where(

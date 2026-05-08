@@ -1,13 +1,30 @@
+from datetime import timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import log_mutation
 from app.auth import get_current_user, require_scope
 from app.database import get_db
-from app.models import Task, User, UserRole
-from app.schemas import TaskCreate, TaskRead, TaskUpdate
+from app.models import AuditEventType, Task, TaskRecurrence, TaskStatus, User, UserRole
+from app.routes.notifications import add_notification
+from app.schemas import BulkAction, TaskCreate, TaskRead, TaskUpdate
+
+
+_RECURRENCE_DELTA = {
+    TaskRecurrence.DAILY: timedelta(days=1),
+    TaskRecurrence.WEEKLY: timedelta(weeks=1),
+    TaskRecurrence.MONTHLY: timedelta(days=30),  # close enough; calendar months are awkward
+}
+
+
+def _next_due_date(prev_due, rule: TaskRecurrence):
+    delta = _RECURRENCE_DELTA.get(rule)
+    if not delta or not prev_due:
+        return None
+    return prev_due + delta
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -49,9 +66,20 @@ async def create_task(data: TaskCreate, db: AsyncSession = Depends(get_db), curr
     if task.assigned_to is None:
         task.assigned_to = current_user.id
     db.add(task)
+    await db.flush()
+    log_mutation(db, event_type=AuditEventType.TASK_CREATED, user=current_user, entity_type="task", entity_id=task.id, after=task)
+    if task.assigned_to and task.assigned_to != current_user.id:
+        add_notification(
+            db,
+            user_id=task.assigned_to,
+            title=f"Task assigned: {task.title}",
+            message=f"{current_user.full_name or current_user.email} assigned you a task.",
+            entity_type="task",
+            entity_id=task.id,
+        )
     await db.commit()
-    await db.refresh(task)
-    return task
+    refreshed = await db.execute(select(Task).where(Task.id == task.id))
+    return refreshed.scalar_one()
 
 
 @router.patch("/{task_id}", response_model=TaskRead)
@@ -63,11 +91,50 @@ async def update_task(task_id: UUID, data: TaskUpdate, db: AsyncSession = Depend
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    before_snapshot = {c.name: getattr(task, c.name) for c in task.__table__.columns}
+    old_assigned_to = task.assigned_to
+    old_status = task.status
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(task, field, value)
+    log_mutation(db, event_type=AuditEventType.TASK_UPDATED, user=current_user, entity_type="task", entity_id=task.id, before=before_snapshot, after=task)
+    # Spawn next instance when a recurring task is completed.
+    if (
+        task.status == TaskStatus.DONE
+        and old_status != TaskStatus.DONE
+        and task.recurrence_rule
+        and task.recurrence_rule != TaskRecurrence.NONE
+    ):
+        next_due = _next_due_date(task.due_date, task.recurrence_rule)
+        if next_due:
+            next_task = Task(
+                title=task.title,
+                description=task.description,
+                status=TaskStatus.TODO,
+                due_date=next_due,
+                assigned_to=task.assigned_to,
+                contact_id=task.contact_id,
+                deal_id=task.deal_id,
+                reminder_minutes_before=task.reminder_minutes_before,
+                recurrence_rule=task.recurrence_rule,
+                parent_task_id=task.id,
+            )
+            db.add(next_task)
+    if (
+        task.assigned_to
+        and task.assigned_to != old_assigned_to
+        and task.assigned_to != current_user.id
+    ):
+        add_notification(
+            db,
+            user_id=task.assigned_to,
+            title=f"Task assigned: {task.title}",
+            message=f"{current_user.full_name or current_user.email} assigned you a task.",
+            entity_type="task",
+            entity_id=task.id,
+        )
     await db.commit()
-    await db.refresh(task)
-    return task
+    refreshed = await db.execute(select(Task).where(Task.id == task.id))
+    return refreshed.scalar_one()
 
 
 @router.delete("/{task_id}")
@@ -79,6 +146,39 @@ async def delete_task(task_id: UUID, db: AsyncSession = Depends(get_db), current
     task = result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    before_snapshot = {c.name: getattr(task, c.name) for c in task.__table__.columns}
+    task_id_copy = task.id
     await db.delete(task)
+    log_mutation(db, event_type=AuditEventType.TASK_DELETED, user=current_user, entity_type="task", entity_id=task_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/bulk")
+async def bulk_tasks(
+    data: BulkAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("tasks:write")),
+):
+    query = select(Task).where(Task.id.in_(data.ids))
+    if current_user.role == UserRole.USER:
+        query = query.where(Task.assigned_to == current_user.id)
+    tasks = (await db.execute(query)).scalars().all()
+    affected = 0
+    for t in tasks:
+        before = {col.name: getattr(t, col.name) for col in t.__table__.columns}
+        if data.action == "delete":
+            tid = t.id
+            await db.delete(t)
+            log_mutation(db, event_type=AuditEventType.TASK_DELETED, user=current_user, entity_type="task", entity_id=tid, before=before)
+        elif data.action == "set_status" and data.status:
+            t.status = data.status
+            log_mutation(db, event_type=AuditEventType.TASK_UPDATED, user=current_user, entity_type="task", entity_id=t.id, before=before, after=t)
+        elif data.action == "set_owner":
+            t.assigned_to = data.owner_id
+            log_mutation(db, event_type=AuditEventType.TASK_UPDATED, user=current_user, entity_type="task", entity_id=t.id, before=before, after=t)
+        else:
+            continue
+        affected += 1
+    await db.commit()
+    return {"affected": affected}

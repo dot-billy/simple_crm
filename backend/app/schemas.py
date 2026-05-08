@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.models import AccountType, ActivityType, CustomFieldType, DealStage, EmailDirection, EmailTrackingEventType, TaskStatus, UserRole
+from app.models import AccountType, ActivityType, CustomFieldType, DealStage, EmailDirection, EmailTrackingEventType, TaskPriority, TaskRecurrence, TaskStatus, UserRole
 
 
 # --- Auth ---
@@ -115,6 +115,7 @@ class ContactCreate(BaseModel):
     company_id: UUID | None = None
     source: str | None = Field(None, max_length=100)
     notes: str | None = Field(None, max_length=5000)
+    address: str | None = Field(None, max_length=2000)
     tag_ids: list[UUID] = []
 
 
@@ -129,6 +130,7 @@ class ContactRead(BaseModel):
     owner_id: UUID | None = None
     source: str | None = None
     notes: str | None = None
+    address: str | None = None
     tags: list[TagRead] = []
     created_at: datetime
     updated_at: datetime
@@ -145,6 +147,7 @@ class ContactUpdate(BaseModel):
     company_id: UUID | None = None
     source: str | None = Field(None, max_length=100)
     notes: str | None = Field(None, max_length=5000)
+    address: str | None = Field(None, max_length=2000)
     tag_ids: list[UUID] | None = None
 
 
@@ -191,6 +194,50 @@ class CompanyUpdate(BaseModel):
 
 # --- Deal ---
 
+class SavedViewCreate(BaseModel):
+    entity_type: str = Field(max_length=50)
+    name: str = Field(max_length=255)
+    filters: dict
+    is_shared: bool = False
+
+
+class SavedViewUpdate(BaseModel):
+    name: str | None = Field(None, max_length=255)
+    filters: dict | None = None
+    is_shared: bool | None = None
+
+
+class SavedViewRead(BaseModel):
+    id: UUID
+    user_id: UUID
+    entity_type: str
+    name: str
+    filters: dict
+    is_shared: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BulkAction(BaseModel):
+    action: str  # delete | add_tag | remove_tag | set_owner | set_stage | set_status
+    ids: list[UUID] = Field(min_length=1, max_length=500)
+    tag_id: UUID | None = None
+    owner_id: UUID | None = None
+    stage: DealStage | None = None
+    status: TaskStatus | None = None
+
+
+_STAGE_DEFAULT_PROBABILITY = {
+    "lead": 10.0,
+    "qualified": 25.0,
+    "proposal": 50.0,
+    "negotiation": 75.0,
+    "closed_won": 100.0,
+    "closed_lost": 0.0,
+}
+
+
 class DealCreate(BaseModel):
     title: str = Field(max_length=255)
     value: float = 0
@@ -200,6 +247,7 @@ class DealCreate(BaseModel):
     company_id: UUID | None = None
     expected_close_date: datetime | None = None
     notes: str | None = Field(None, max_length=5000)
+    probability: float | None = Field(None, ge=0, le=100)
     tag_ids: list[UUID] = []
 
 
@@ -214,6 +262,7 @@ class DealRead(BaseModel):
     owner_id: UUID | None = None
     expected_close_date: datetime | None = None
     notes: str | None = None
+    probability: float | None = None
     tags: list[TagRead] = []
     created_at: datetime
     updated_at: datetime
@@ -228,8 +277,10 @@ class DealUpdate(BaseModel):
     stage: DealStage | None = None
     contact_id: UUID | None = None
     company_id: UUID | None = None
+    owner_id: UUID | None = None
     expected_close_date: datetime | None = None
     notes: str | None = Field(None, max_length=5000)
+    probability: float | None = Field(None, ge=0, le=100)
     tag_ids: list[UUID] | None = None
 
 
@@ -272,6 +323,10 @@ class TaskCreate(BaseModel):
     assigned_to: UUID | None = None
     contact_id: UUID | None = None
     deal_id: UUID | None = None
+    reminder_minutes_before: int | None = Field(None, ge=0)
+    recurrence_rule: TaskRecurrence = TaskRecurrence.NONE
+    parent_task_id: UUID | None = None
+    priority: TaskPriority = TaskPriority.MEDIUM
 
 
 class TaskRead(BaseModel):
@@ -283,6 +338,10 @@ class TaskRead(BaseModel):
     assigned_to: UUID | None = None
     contact_id: UUID | None = None
     deal_id: UUID | None = None
+    reminder_minutes_before: int | None = None
+    recurrence_rule: TaskRecurrence = TaskRecurrence.NONE
+    parent_task_id: UUID | None = None
+    priority: TaskPriority = TaskPriority.MEDIUM
     created_at: datetime
     updated_at: datetime
 
@@ -297,6 +356,9 @@ class TaskUpdate(BaseModel):
     assigned_to: UUID | None = None
     contact_id: UUID | None = None
     deal_id: UUID | None = None
+    reminder_minutes_before: int | None = Field(None, ge=0)
+    recurrence_rule: TaskRecurrence | None = None
+    priority: TaskPriority | None = None
 
 
 # --- Custom Fields ---
@@ -304,9 +366,21 @@ class TaskUpdate(BaseModel):
 class CustomFieldDefinitionCreate(BaseModel):
     name: str = Field(max_length=255)
     field_type: CustomFieldType
-    entity_type: str = Field(max_length=50)  # "contact" or "company"
+    entity_type: str = Field(max_length=50)  # "contact", "company", "deal"
     options: str | None = Field(None, max_length=5000)
     is_required: bool = False
+    validation_rule: str | None = Field(None, max_length=2000)  # JSON: {regex, min, max}
+    default_value: str | None = Field(None, max_length=2000)
+    display_order: int = 0
+
+
+class CustomFieldDefinitionUpdate(BaseModel):
+    name: str | None = Field(None, max_length=255)
+    options: str | None = Field(None, max_length=5000)
+    is_required: bool | None = None
+    validation_rule: str | None = Field(None, max_length=2000)
+    default_value: str | None = Field(None, max_length=2000)
+    display_order: int | None = None
 
 
 class CustomFieldDefinitionRead(BaseModel):
@@ -316,6 +390,9 @@ class CustomFieldDefinitionRead(BaseModel):
     entity_type: str
     options: str | None = None
     is_required: bool
+    validation_rule: str | None = None
+    default_value: str | None = None
+    display_order: int = 0
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -325,6 +402,7 @@ class CustomFieldValueCreate(BaseModel):
     field_id: UUID
     contact_id: UUID | None = None
     company_id: UUID | None = None
+    deal_id: UUID | None = None
     value: str = Field(max_length=10000)
 
 
@@ -333,6 +411,7 @@ class CustomFieldValueRead(BaseModel):
     field_id: UUID
     contact_id: UUID | None = None
     company_id: UUID | None = None
+    deal_id: UUID | None = None
     value: str | None = None
 
     model_config = {"from_attributes": True}
@@ -710,4 +789,25 @@ class CompanyProfile(BaseModel):
     custom_fields: list[CustomFieldValueRead] = []
     custom_field_definitions: list[CustomFieldDefinitionRead] = []
     stats: CompanyStats
+    model_config = {"from_attributes": True}
+
+
+class DealStats(BaseModel):
+    total_activities: int = 0
+    total_tasks: int = 0
+    open_tasks: int = 0
+    days_in_stage: int = 0
+    days_open: int = 0
+    last_activity_date: datetime | None = None
+
+
+class DealProfile(BaseModel):
+    deal: DealRead
+    contact: ContactRead | None = None
+    company: CompanyRead | None = None
+    activities: list[ActivityRead] = []
+    tasks: list[TaskRead] = []
+    custom_fields: list[CustomFieldValueRead] = []
+    custom_field_definitions: list[CustomFieldDefinitionRead] = []
+    stats: DealStats
     model_config = {"from_attributes": True}

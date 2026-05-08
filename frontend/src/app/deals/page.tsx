@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +11,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiFetch, apiUpload } from "@/lib/api";
-import { Plus, Trash2, GripVertical, Download, Upload } from "lucide-react";
+import { Plus, Trash2, GripVertical, Download, Upload, Handshake } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
+import { BulkActionBar } from "@/components/bulk-action-bar";
+import { SavedViewsPicker } from "@/components/saved-views-picker";
 import {
   DndContext,
   DragEndEvent,
@@ -117,7 +121,7 @@ function SortableDealCard({
               <GripVertical className="h-4 w-4" />
             </button>
             <div>
-              <p className="font-medium text-sm">{deal.title}</p>
+              <Link href={`/deals/${deal.id}`} className="font-medium text-sm hover:underline">{deal.title}</Link>
               <p className="text-lg font-bold text-primary">
                 ${deal.value.toLocaleString()}
               </p>
@@ -157,6 +161,7 @@ export default function DealsPage() {
   const [form, setForm] = useState({ title: "", value: "0", stage: "lead" });
   const [viewMode, setViewMode] = useState<"table" | "pipeline">("pipeline");
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -322,6 +327,15 @@ export default function DealsPage() {
           </div>
         </div>
 
+        <SavedViewsPicker
+          entity="deal"
+          currentFilters={{ stageFilter, viewMode }}
+          onApply={(f) => {
+            if (typeof f.stageFilter === "string") setStageFilter(f.stageFilter);
+            if (f.viewMode === "table" || f.viewMode === "pipeline") setViewMode(f.viewMode);
+          }}
+        />
+
         {viewMode === "pipeline" ? (
           <DndContext
             sensors={sensors}
@@ -329,9 +343,9 @@ export default function DealsPage() {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <div className="flex gap-4 overflow-x-auto pb-4">
+            <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory md:snap-none">
               {dealsByStage.map((col) => (
-                <div key={col.value} className="min-w-[250px] sm:min-w-[280px] flex-shrink-0">
+                <div key={col.value} className="min-w-[85vw] sm:min-w-[280px] flex-shrink-0 snap-start">
                   <div className="mb-3 flex items-center justify-between">
                     <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${col.color}`}>
                       {col.label}
@@ -374,12 +388,31 @@ export default function DealsPage() {
             </DragOverlay>
           </DndContext>
         ) : (
+          <>
+          <BulkActionBar
+            entity="deals"
+            selectedIds={selectedIds}
+            onClear={() => setSelectedIds([])}
+            onApplied={load}
+            actions={["set_stage", "add_tag", "remove_tag", "delete"]}
+          />
           <Card>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
               <table className="w-full min-w-[600px]">
                 <thead>
                   <tr className="border-b text-left text-sm text-muted-foreground">
+                    <th className="p-4 w-10">
+                      <input
+                        type="checkbox"
+                        checked={!!data && data.items.length > 0 && data.items.every((d) => selectedIds.includes(d.id))}
+                        onChange={(e) => {
+                          if (!data) return;
+                          if (e.target.checked) setSelectedIds(Array.from(new Set([...selectedIds, ...data.items.map((d) => d.id)])));
+                          else setSelectedIds(selectedIds.filter((id) => !data.items.some((d) => d.id === id)));
+                        }}
+                      />
+                    </th>
                     <th className="p-4">Title</th>
                     <th className="p-4">Value</th>
                     <th className="p-4">Stage</th>
@@ -392,7 +425,19 @@ export default function DealsPage() {
                     const stageInfo = stages.find((s) => s.value === d.stage);
                     return (
                       <tr key={d.id} className="border-b hover:bg-muted/50">
-                        <td className="p-4 font-medium">{d.title}</td>
+                        <td className="p-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(d.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedIds([...selectedIds, d.id]);
+                              else setSelectedIds(selectedIds.filter((id) => id !== d.id));
+                            }}
+                          />
+                        </td>
+                        <td className="p-4 font-medium">
+                          <Link href={`/deals/${d.id}`} className="text-primary hover:underline">{d.title}</Link>
+                        </td>
                         <td className="p-4">${d.value.toLocaleString()}</td>
                         <td className="p-4">
                           <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${stageInfo?.color || ""}`}>
@@ -407,13 +452,20 @@ export default function DealsPage() {
                     );
                   })}
                   {data?.items.length === 0 && (
-                    <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No deals found</td></tr>
+                    <tr><td colSpan={6} className="p-0">
+                      <EmptyState
+                        icon={Handshake}
+                        title={stageFilter ? "No deals in this stage" : "No deals yet"}
+                        description={stageFilter ? "Try a different stage filter." : "Click Add Deal to start tracking opportunities."}
+                      />
+                    </td></tr>
                   )}
                 </tbody>
               </table>
               </div>
             </CardContent>
           </Card>
+          </>
         )}
       </div>
     </AppShell>

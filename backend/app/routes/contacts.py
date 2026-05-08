@@ -2,16 +2,17 @@ import csv
 import io
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.audit import log_mutation
 from app.auth import get_current_user, require_scope
 from app.database import get_db
-from app.models import Activity, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole, contact_tags
-from app.schemas import ContactCreate, ContactProfile, ContactRead, ContactStats, ContactUpdate, CompanyRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead, TaskRead
+from app.models import Activity, AuditEventType, Company, Contact, CustomFieldDefinition, CustomFieldValue, Deal, DealStage, Tag, Task, TaskStatus, User, UserRole, contact_tags
+from app.schemas import BulkAction, ContactCreate, ContactProfile, ContactRead, ContactStats, ContactUpdate, CompanyRead, CustomFieldDefinitionRead, CustomFieldValueRead, DealRead, TaskRead
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
 
@@ -33,6 +34,7 @@ def _apply_ownership_filter(query, user: User):
 
 @router.get("", response_model=dict)
 async def list_contacts(
+    request: Request,
     page: int = Query(1, ge=1),
     per_page: int = Query(25, ge=1, le=100),
     search: str = Query(""),
@@ -40,6 +42,7 @@ async def list_contacts(
     sort_dir: str = Query("desc"),
     tag_id: str = Query(""),
     source: str = Query(""),
+    include_custom_fields: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_scope("contacts:read")),
 ):
@@ -59,6 +62,19 @@ async def list_contacts(
     if source:
         query = query.where(Contact.source == source)
 
+    # Custom field filters: ?cf_<field_id>=value matches CustomFieldValue.value
+    cf_filters = {k[3:]: v for k, v in request.query_params.items() if k.startswith("cf_") and v}
+    for field_id, val in cf_filters.items():
+        try:
+            fid = UUID(field_id)
+        except ValueError:
+            continue
+        sub = (
+            select(CustomFieldValue.contact_id)
+            .where(CustomFieldValue.field_id == fid, CustomFieldValue.value.ilike(f"%{val}%"))
+        )
+        query = query.where(Contact.id.in_(sub))
+
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar() or 0
 
@@ -68,8 +84,20 @@ async def list_contacts(
     result = await db.execute(query)
     items = result.scalars().all()
 
+    items_data = [ContactRead.model_validate(c).model_dump(mode="json") for c in items]
+    if include_custom_fields and items:
+        ids = [c.id for c in items]
+        cfvs = (await db.execute(select(CustomFieldValue).where(CustomFieldValue.contact_id.in_(ids)))).scalars().all()
+        by_contact: dict = {}
+        for v in cfvs:
+            by_contact.setdefault(str(v.contact_id), []).append({
+                "field_id": str(v.field_id), "value": v.value,
+            })
+        for d in items_data:
+            d["custom_fields"] = by_contact.get(d["id"], [])
+
     return {
-        "items": [ContactRead.model_validate(c) for c in items],
+        "items": items_data,
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -118,9 +146,11 @@ async def create_contact(
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         contact.tags = list(tags)
     db.add(contact)
+    await db.flush()
+    log_mutation(db, event_type=AuditEventType.CONTACT_CREATED, user=current_user, entity_type="contact", entity_id=contact.id, after=contact)
     await db.commit()
-    await db.refresh(contact, ["tags"])
-    return contact
+    refreshed = await db.execute(select(Contact).options(selectinload(Contact.tags)).where(Contact.id == contact.id))
+    return refreshed.scalar_one()
 
 
 @router.patch("/{contact_id}", response_model=ContactRead)
@@ -137,6 +167,8 @@ async def update_contact(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
 
+    before_snapshot = {c.name: getattr(contact, c.name) for c in contact.__table__.columns}
+
     update_data = data.model_dump(exclude_unset=True, exclude={"tag_ids"})
     for field, value in update_data.items():
         setattr(contact, field, value)
@@ -145,9 +177,10 @@ async def update_contact(
         tags = (await db.execute(select(Tag).where(Tag.id.in_(data.tag_ids)))).scalars().all()
         contact.tags = list(tags)
 
+    log_mutation(db, event_type=AuditEventType.CONTACT_UPDATED, user=current_user, entity_type="contact", entity_id=contact.id, before=before_snapshot, after=contact)
     await db.commit()
-    await db.refresh(contact, ["tags"])
-    return contact
+    refreshed = await db.execute(select(Contact).options(selectinload(Contact.tags)).where(Contact.id == contact.id))
+    return refreshed.scalar_one()
 
 
 @router.delete("/{contact_id}")
@@ -162,9 +195,46 @@ async def delete_contact(
     contact = result.scalar_one_or_none()
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
+    before_snapshot = {c.name: getattr(contact, c.name) for c in contact.__table__.columns}
+    contact_id_copy = contact.id
     await db.delete(contact)
+    log_mutation(db, event_type=AuditEventType.CONTACT_DELETED, user=current_user, entity_type="contact", entity_id=contact_id_copy, before=before_snapshot)
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/bulk")
+async def bulk_contacts(
+    data: BulkAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("contacts:write")),
+):
+    query = select(Contact).options(selectinload(Contact.tags)).where(Contact.id.in_(data.ids))
+    query = _apply_ownership_filter(query, current_user)
+    contacts = (await db.execute(query)).scalars().all()
+    affected = 0
+    for c in contacts:
+        before = {col.name: getattr(c, col.name) for col in c.__table__.columns}
+        if data.action == "delete":
+            cid = c.id
+            await db.delete(c)
+            log_mutation(db, event_type=AuditEventType.CONTACT_DELETED, user=current_user, entity_type="contact", entity_id=cid, before=before)
+        elif data.action == "add_tag" and data.tag_id:
+            tag = (await db.execute(select(Tag).where(Tag.id == data.tag_id))).scalar_one_or_none()
+            if tag and tag not in c.tags:
+                c.tags.append(tag)
+                log_mutation(db, event_type=AuditEventType.CONTACT_UPDATED, user=current_user, entity_type="contact", entity_id=c.id, before=before, after=c)
+        elif data.action == "remove_tag" and data.tag_id:
+            c.tags = [t for t in c.tags if t.id != data.tag_id]
+            log_mutation(db, event_type=AuditEventType.CONTACT_UPDATED, user=current_user, entity_type="contact", entity_id=c.id, before=before, after=c)
+        elif data.action == "set_owner":
+            c.owner_id = data.owner_id
+            log_mutation(db, event_type=AuditEventType.CONTACT_UPDATED, user=current_user, entity_type="contact", entity_id=c.id, before=before, after=c)
+        else:
+            continue
+        affected += 1
+    await db.commit()
+    return {"affected": affected}
 
 
 @router.get("/{contact_id}/profile", response_model=ContactProfile)
