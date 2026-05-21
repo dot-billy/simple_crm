@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.audit import log_mutation
-from app.auth import get_current_user, require_scope
+from app.auth import require_scope
 from app.catalyst_intake import is_catalyst_intake_activity, notify_catalyst_intake_slack
 from app.config import settings
 from app.database import get_db
