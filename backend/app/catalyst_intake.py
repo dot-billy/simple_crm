@@ -120,5 +120,13 @@ def _contact_name(contact: Any) -> str:
     return name or email
 
 
+def _escape_slack_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _display_value(value: str | None) -> str:
-    return value or "Not provided"
+    if not value:
+        return "Not provided"
+    return _escape_slack_text(value)

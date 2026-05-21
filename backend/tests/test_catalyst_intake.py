@@ -44,11 +44,40 @@ class CatalystIntakeTests(unittest.TestCase):
         self.assertTrue(payload["text"].startswith("*New Catalyst managed intake*"))
         self.assertIn("Selected path: Managed service", payload["text"])
         self.assertIn("Company: Acme Networks", payload["text"])
-        self.assertIn("Key person: Avery Stone <avery@example.com>", payload["text"])
+        self.assertIn("Key person: Avery Stone &lt;avery@example.com&gt;", payload["text"])
         self.assertIn("Expected nodes/sites: 75 nodes / 4 sites", payload["text"])
         self.assertIn("Timeline: Next month", payload["text"])
         self.assertIn("Notes: Needs CISO review before rollout", payload["text"])
         self.assertIn("CRM deal: https://crm.example.com/deals/deal-123", payload["text"])
+
+    def test_build_slack_payload_escapes_public_submitted_mrkdwn_control_chars(self):
+        activity = SimpleNamespace(
+            description="\n".join(
+                [
+                    "Selected path: Managed service",
+                    "Company: <!channel> & <https://evil.example|link>",
+                    "Key person: <@U123> <user@example.com>",
+                    "Expected nodes/sites: 75 nodes / 4 sites",
+                    "Timeline: Needs > 10 days",
+                    "Notes: Needs > 10 nodes & <script>",
+                ]
+            )
+        )
+        deal = SimpleNamespace(id="deal-123")
+
+        payload = build_slack_payload(activity, deal, None, None, "https://crm.example.com/")
+
+        text = payload["text"]
+        self.assertTrue(text.startswith("*New Catalyst managed intake*"))
+        self.assertIn("CRM deal: https://crm.example.com/deals/deal-123", text)
+        self.assertNotIn("<!channel>", text)
+        self.assertNotIn("<@U123>", text)
+        self.assertNotIn("<https://evil.example|link>", text)
+        self.assertNotIn("<script>", text)
+        self.assertIn("Company: &lt;!channel&gt; &amp; &lt;https://evil.example|link&gt;", text)
+        self.assertIn("Key person: &lt;@U123&gt; &lt;user@example.com&gt;", text)
+        self.assertIn("Timeline: Needs &gt; 10 days", text)
+        self.assertIn("Notes: Needs &gt; 10 nodes &amp; &lt;script&gt;", text)
 
     def test_build_slack_payload_uses_contact_and_company_fallbacks(self):
         activity = SimpleNamespace(
@@ -62,13 +91,13 @@ class CatalystIntakeTests(unittest.TestCase):
             )
         )
         deal = SimpleNamespace(id="deal-456")
-        contact = SimpleNamespace(first_name="Jamie", last_name="Mills", email="jamie@example.com")
-        company = SimpleNamespace(name="Fallback Co")
+        contact = SimpleNamespace(first_name="<Jamie>", last_name="Mills & Partners", email="jamie@example.com")
+        company = SimpleNamespace(name="Fallback & Co <Main>")
 
         payload = build_slack_payload(activity, deal, contact, company, "")
 
-        self.assertIn("Company: Fallback Co", payload["text"])
-        self.assertIn("Key person: Jamie Mills <jamie@example.com>", payload["text"])
+        self.assertIn("Company: Fallback &amp; Co &lt;Main&gt;", payload["text"])
+        self.assertIn("Key person: &lt;Jamie&gt; Mills &amp; Partners &lt;jamie@example.com&gt;", payload["text"])
         self.assertIn("CRM deal: /deals/deal-456", payload["text"])
 
 
@@ -221,7 +250,7 @@ class CatalystIntakeSchedulingTests(unittest.TestCase):
             scheduled_kwargs["crm_frontend_base_url"],
         )
         self.assertIn("Company: Acme Networks", payload["text"])
-        self.assertIn("Key person: Avery Stone <avery@example.com>", payload["text"])
+        self.assertIn("Key person: Avery Stone &lt;avery@example.com&gt;", payload["text"])
         self.assertIn("Notes: Needs CISO review before rollout", payload["text"])
         self.assertIn("CRM deal: https://crm.example.com/deals/deal-123", payload["text"])
 
