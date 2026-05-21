@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     APP_BASE_URL: str = "http://localhost:8000"  # for tracking pixel/link URLs
     SLACK_WEBHOOK_URL: str = ""
     CRM_FRONTEND_BASE_URL: str = "http://localhost:3000"
+    CATALYST_INTAKE_WORKER_POLL_SECONDS: float = 5.0
 
     model_config = {"env_file": ".env"}
 

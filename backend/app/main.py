@@ -16,7 +16,7 @@ from app.database import engine, async_session, Base
 from app.gmail_sync_worker import gmail_sync_loop
 from app.notification_worker import notification_worker_loop
 from app.models import User, UserRole
-from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email, search, notifications, api_keys, service_accounts, agent, audit, saved_views
+from app.routes import auth, contacts, companies, deals, activities, tasks, tags, custom_fields, dashboard, email, search, notifications, api_keys, service_accounts, agent, audit, saved_views, catalyst_intake
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -159,6 +159,7 @@ app.include_router(service_accounts.router)
 app.include_router(agent.router)
 app.include_router(audit.router)
 app.include_router(saved_views.router)
+app.include_router(catalyst_intake.router)
 
 
 @app.get("/api/health")

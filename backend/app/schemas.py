@@ -104,6 +104,49 @@ class TagRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# --- Catalyst Intake ---
+
+class CatalystIntakeCreate(BaseModel):
+    path: str = Field(max_length=100)
+    name: str = Field(max_length=255)
+    email: EmailStr
+    company: str = Field(max_length=255)
+    expected_nodes_sites: str = Field(max_length=500)
+    timeline: str = Field(max_length=100)
+    notes: str = Field(default="", max_length=2000)
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"shared-hosted", "dedicated-managed", "enterprise-msp"}:
+            raise ValueError("Choose a managed Catalyst path.")
+        return normalized
+
+    @field_validator("name", "company", "expected_nodes_sites", "timeline")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Field is required.")
+        return normalized
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: EmailStr) -> str:
+        return str(value).strip().lower()
+
+    @field_validator("notes")
+    @classmethod
+    def normalize_notes(cls, value: str) -> str:
+        return value.strip()
+
+
+class CatalystIntakeAccepted(BaseModel):
+    id: UUID
+    status: str = "accepted"
+
+
 # --- Contact ---
 
 class ContactCreate(BaseModel):
