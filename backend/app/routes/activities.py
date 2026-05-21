@@ -3,9 +3,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.audit import log_mutation
 from app.auth import get_current_user, require_scope
+from app.catalyst_intake import is_catalyst_intake_activity, notify_catalyst_intake_slack
+from app.config import settings
 from app.database import get_db
 from app.models import Activity, AuditEventType, Contact, Deal, EmailMessage, Task, User, UserRole
 from app.routes.notifications import add_notification
@@ -61,8 +64,29 @@ async def create_activity(data: ActivityCreate, db: AsyncSession = Depends(get_d
                 entity_type="contact",
                 entity_id=contact.id,
             )
+    should_notify_catalyst_intake = is_catalyst_intake_activity(activity) and activity.deal_id
+    activity_id = activity.id
     await db.commit()
-    refreshed = await db.execute(select(Activity).where(Activity.id == activity.id))
+    if should_notify_catalyst_intake:
+        intake_activity_result = await db.execute(
+            select(Activity)
+            .options(
+                selectinload(Activity.contact),
+                selectinload(Activity.deal).selectinload(Deal.company),
+            )
+            .where(Activity.id == activity_id)
+        )
+        intake_activity = intake_activity_result.scalar_one_or_none()
+        if intake_activity:
+            await notify_catalyst_intake_slack(
+                webhook_url=settings.SLACK_WEBHOOK_URL,
+                activity=intake_activity,
+                deal=intake_activity.deal,
+                contact=intake_activity.contact,
+                company=intake_activity.deal.company if intake_activity.deal else None,
+                crm_frontend_base_url=settings.CRM_FRONTEND_BASE_URL,
+            )
+    refreshed = await db.execute(select(Activity).where(Activity.id == activity_id))
     return refreshed.scalar_one()
 
 

@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     GOOGLE_DELEGATED_USER: str = ""  # admin email for domain-wide delegation
     GMAIL_SYNC_INTERVAL_SECONDS: int = 300  # 5 minutes
     APP_BASE_URL: str = "http://localhost:8000"  # for tracking pixel/link URLs
+    SLACK_WEBHOOK_URL: str = ""
+    CRM_FRONTEND_BASE_URL: str = "http://localhost:3000"
 
     model_config = {"env_file": ".env"}
 
