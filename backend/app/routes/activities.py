@@ -1,13 +1,17 @@
+from types import SimpleNamespace
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.audit import log_mutation
-from app.auth import get_current_user, require_scope
+from app.auth import require_scope
+from app.catalyst_intake import is_catalyst_intake_activity, notify_catalyst_intake_slack
+from app.config import settings
 from app.database import get_db
-from app.models import Activity, AuditEventType, Contact, Deal, EmailMessage, Task, User, UserRole
+from app.models import Activity, AuditEventType, Company, Contact, Deal, EmailMessage, Task, User, UserRole
 from app.routes.notifications import add_notification
 from app.schemas import ActivityCreate, ActivityRead, PaginatedTimelineResponse, TimelineItem
 
@@ -45,7 +49,12 @@ async def list_activities(
 
 
 @router.post("", response_model=ActivityRead)
-async def create_activity(data: ActivityCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_scope("activities:write"))):
+async def create_activity(
+    data: ActivityCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_scope("activities:write")),
+):
     activity = Activity(**data.model_dump(), created_by=current_user.id)
     db.add(activity)
     await db.flush()
@@ -61,9 +70,81 @@ async def create_activity(data: ActivityCreate, db: AsyncSession = Depends(get_d
                 entity_type="contact",
                 entity_id=contact.id,
             )
+    should_notify_catalyst_intake = is_catalyst_intake_activity(activity) and activity.deal_id
+    activity_id = activity.id
     await db.commit()
-    refreshed = await db.execute(select(Activity).where(Activity.id == activity.id))
+    if should_notify_catalyst_intake:
+        intake_activity_result = await db.execute(
+            select(Activity)
+            .options(
+                selectinload(Activity.contact),
+                selectinload(Activity.deal).selectinload(Deal.company),
+            )
+            .where(Activity.id == activity_id)
+        )
+        intake_activity = intake_activity_result.scalar_one_or_none()
+        if intake_activity:
+            _schedule_catalyst_intake_notification(
+                background_tasks,
+                activity=intake_activity,
+                slack_webhook_url=settings.SLACK_WEBHOOK_URL,
+                crm_frontend_base_url=settings.CRM_FRONTEND_BASE_URL,
+            )
+    refreshed = await db.execute(select(Activity).where(Activity.id == activity_id))
     return refreshed.scalar_one()
+
+
+def _schedule_catalyst_intake_notification(
+    background_tasks: BackgroundTasks,
+    activity: Activity,
+    *,
+    slack_webhook_url: str,
+    crm_frontend_base_url: str,
+) -> bool:
+    if not slack_webhook_url.strip():
+        return False
+    if not (is_catalyst_intake_activity(activity) and getattr(activity, "deal_id", None)):
+        return False
+
+    deal = getattr(activity, "deal", None)
+    contact = getattr(activity, "contact", None)
+    company = getattr(deal, "company", None) if deal else None
+    background_tasks.add_task(
+        notify_catalyst_intake_slack,
+        webhook_url=slack_webhook_url,
+        activity=_copy_intake_activity(activity),
+        deal=_copy_intake_deal(deal),
+        contact=_copy_intake_contact(contact),
+        company=_copy_intake_company(company),
+        crm_frontend_base_url=crm_frontend_base_url,
+    )
+    return True
+
+
+def _copy_intake_activity(activity: Activity) -> SimpleNamespace:
+    return SimpleNamespace(description=getattr(activity, "description", None))
+
+
+def _copy_intake_deal(deal: Deal | None) -> SimpleNamespace | None:
+    if deal is None:
+        return None
+    return SimpleNamespace(id=getattr(deal, "id", ""))
+
+
+def _copy_intake_contact(contact: Contact | None) -> SimpleNamespace | None:
+    if contact is None:
+        return None
+    return SimpleNamespace(
+        first_name=getattr(contact, "first_name", "") or "",
+        last_name=getattr(contact, "last_name", "") or "",
+        email=getattr(contact, "email", "") or "",
+    )
+
+
+def _copy_intake_company(company: Company | None) -> SimpleNamespace | None:
+    if company is None:
+        return None
+    return SimpleNamespace(name=getattr(company, "name", "") or "")
 
 
 @router.delete("/{activity_id}")

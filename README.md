@@ -79,6 +79,8 @@ Password requirements: minimum 10 characters, must contain at least one uppercas
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | No | `60` | JWT token lifetime |
 | `CORS_ORIGINS` | No | `http://localhost:3000` | Allowed CORS origins |
 | `NEXT_PUBLIC_API_URL` | No | `http://localhost:8000` | Backend URL for frontend |
+| `SLACK_WEBHOOK_URL` | No | empty | Slack incoming webhook URL for Catalyst managed intake notifications |
+| `CRM_FRONTEND_BASE_URL` | No | `http://localhost:3000` | Frontend base URL used in CRM links sent to Slack |
 
 ### Gmail Integration (optional)
 
@@ -95,6 +97,10 @@ To enable Gmail sync:
 3. Set up domain-wide delegation in Google Workspace Admin
 4. Download the service account JSON key to `./backend/credentials/`
 5. Set the env vars above in `.env`
+
+### Catalyst managed intake Slack notifications (optional)
+
+Set `SLACK_WEBHOOK_URL` to a Slack incoming webhook URL to notify Slack when a Catalyst managed intake activity is created for a deal. Set `CRM_FRONTEND_BASE_URL` to the public frontend URL so the Slack message links back to the CRM deal.
 
 ## Features
 
