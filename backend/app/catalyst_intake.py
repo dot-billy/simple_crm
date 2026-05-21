@@ -53,14 +53,30 @@ async def notify_catalyst_intake_slack(
     payload = build_slack_payload(activity, deal, contact, company, crm_frontend_base_url)
     try:
         await post_json(webhook_url, payload)
-    except Exception:
-        logger.exception("Failed to deliver Catalyst intake Slack notification")
+    except Exception as exc:
+        status_code = _delivery_failure_status_code(exc)
+        if status_code is None:
+            logger.error(
+                "Failed to deliver Catalyst intake Slack notification (error_type=%s)",
+                type(exc).__name__,
+            )
+        else:
+            logger.error(
+                "Failed to deliver Catalyst intake Slack notification (error_type=%s, status_code=%s)",
+                type(exc).__name__,
+                status_code,
+            )
 
 
 async def _post_slack_json(webhook_url: str, payload: SlackPayload) -> None:
     async with httpx.AsyncClient(timeout=5) as client:
         response = await client.post(webhook_url, json=payload)
         response.raise_for_status()
+
+
+def _delivery_failure_status_code(exc: Exception) -> int | None:
+    response = getattr(exc, "response", None)
+    return getattr(response, "status_code", None)
 
 
 def _parse_description_fields(description: str | None) -> dict[str, str]:
