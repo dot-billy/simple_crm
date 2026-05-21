@@ -2,8 +2,10 @@ import importlib
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
+import httpx
+import app.catalyst_intake as catalyst_intake
 from app.catalyst_intake import (
     CATALYST_INTAKE_SUBJECT,
     build_slack_payload,
@@ -140,6 +142,22 @@ class CatalystIntakeSlackTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(submitted_email, log_output)
         self.assertNotIn(submitted_notes, log_output)
         self.assertNotIn("post failed", log_output)
+
+    async def test_post_slack_json_suppresses_transport_logs_that_include_webhook_url(self):
+        fake_webhook_url = "https://hooks.slack.test/services/T000/B000/secret-token"
+        real_async_client = httpx.AsyncClient
+
+        def handle_request(request):
+            return httpx.Response(200, request=request)
+
+        def async_client_factory(*args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handle_request)
+            return real_async_client(*args, **kwargs)
+
+        with patch.object(catalyst_intake.httpx, "AsyncClient", side_effect=async_client_factory):
+            with self.assertNoLogs("httpx", level="INFO"):
+                with self.assertNoLogs("httpcore", level="INFO"):
+                    await catalyst_intake._post_slack_json(fake_webhook_url, {"text": "hello"})
 
 
 class CatalystIntakeSchedulingTests(unittest.TestCase):

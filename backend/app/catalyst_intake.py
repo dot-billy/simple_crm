@@ -69,9 +69,16 @@ async def notify_catalyst_intake_slack(
 
 
 async def _post_slack_json(webhook_url: str, payload: SlackPayload) -> None:
+    _suppress_slack_transport_info_logs()
     async with httpx.AsyncClient(timeout=5) as client:
         response = await client.post(webhook_url, json=payload)
         response.raise_for_status()
+
+
+def _suppress_slack_transport_info_logs() -> None:
+    # httpx/httpcore INFO request logs include full URLs; Slack webhook URLs are secrets.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def _delivery_failure_status_code(exc: Exception) -> int | None:

@@ -30,6 +30,8 @@ services:
       GOOGLE_DELEGATED_USER: ${GOOGLE_DELEGATED_USER:-}
       GMAIL_SYNC_INTERVAL_SECONDS: ${GMAIL_SYNC_INTERVAL_SECONDS:-300}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8000}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      CRM_FRONTEND_BASE_URL: ${CRM_FRONTEND_BASE_URL:-http://localhost:3000}
     volumes:
       - ./backend/credentials:/app/credentials:ro
     expose:
