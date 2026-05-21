@@ -67,6 +67,13 @@ class TaskPriority(str, enum.Enum):
     URGENT = "urgent"
 
 
+class CatalystIntakeStatus(str, enum.Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    PROCESSED = "processed"
+    FAILED = "failed"
+
+
 class EmailDirection(str, enum.Enum):
     INBOUND = "inbound"
     OUTBOUND = "outbound"
@@ -115,6 +122,7 @@ class APIKeyScope(str, enum.Enum):
     AUDIT_READ = "audit:read"
     AGENT_BULK_UPLOAD = "agent:bulk_upload"
     AGENT_RESEARCH = "agent:research"
+    CATALYST_INTAKE_WRITE = "catalyst_intake:write"
     ALL = "*"
 
 
@@ -254,6 +262,37 @@ class Activity(Base):
     contact = relationship("Contact", back_populates="activities")
     deal = relationship("Deal", back_populates="activities")
     created_by_user = relationship("User", back_populates="activities")
+
+
+class CatalystIntakeSubmission(Base):
+    __tablename__ = "catalyst_intake_submissions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    path = Column(String(100), nullable=False)
+    name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False, index=True)
+    company = Column(String(255), nullable=False, index=True)
+    expected_nodes_sites = Column(String(500), nullable=False)
+    timeline = Column(String(100), nullable=False)
+    notes = Column(Text, nullable=False, default="")
+    status = Column(SAEnum(CatalystIntakeStatus), nullable=False, default=CatalystIntakeStatus.PENDING, index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="SET NULL"), nullable=True)
+    contact_id = Column(UUID(as_uuid=True), ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
+    deal_id = Column(UUID(as_uuid=True), ForeignKey("deals.id", ondelete="SET NULL"), nullable=True)
+    activity_id = Column(UUID(as_uuid=True), ForeignKey("activities.id", ondelete="SET NULL"), nullable=True)
+    locked_at = Column(DateTime(timezone=True), nullable=True)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    created_by_user = relationship("User")
+    company_record = relationship("Company")
+    contact_record = relationship("Contact")
+    deal_record = relationship("Deal")
+    activity_record = relationship("Activity")
 
 
 class Task(Base):
